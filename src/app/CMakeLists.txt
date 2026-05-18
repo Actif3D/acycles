@@ -89,6 +89,7 @@ if(WITH_CYCLES_STANDALONE)
   endif()
 
   add_executable(cycles ${SRC} ${INC} ${INC_SYS})
+  set_target_properties(cycles PROPERTIES OUTPUT_NAME acycles)
   unset(SRC)
 
   target_link_libraries(cycles PRIVATE ${LIB})
