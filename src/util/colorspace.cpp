@@ -260,8 +260,13 @@ const char *ColorSpaceManager::colorspace_interop_id(ustring colorspace)
                                    "srgb_p3d65_scene",
                                    "g22_adobergb_scene"};
       for (const char *interop_id : interop_ids) {
-        if (space->hasAlias(interop_id)) {
+        if (strcmp(space->getName(), interop_id) == 0) {
           return interop_id;
+        }
+        for (size_t i = 0; i < space->getNumAliases(); i++) {
+          if (strcmp(space->getAlias(i), interop_id) == 0) {
+            return interop_id;
+          }
         }
       }
     }
@@ -295,11 +300,12 @@ ustring ColorSpaceManager::detect_known_colorspace(ustring colorspace,
       colorspace = file_colorspace;
     }
     else {
-      const char *role_colorspace = (is_float) ? config->getRoleColorSpace("default_float") :
-                                                 config->getRoleColorSpace("default_byte");
-      role_colorspace = (role_colorspace) ? role_colorspace : config->getRoleColorSpace("default");
+      OCIO::ConstColorSpaceRcPtr role_colorspace = (is_float) ?
+                                                       config->getColorSpace("default_float") :
+                                                       config->getColorSpace("default_byte");
+      role_colorspace = (role_colorspace) ? role_colorspace : config->getColorSpace("default");
       if (role_colorspace) {
-        colorspace = role_colorspace;
+        colorspace = role_colorspace->getName();
       }
     }
   }
@@ -503,7 +509,7 @@ inline void processor_apply_pixels_rgba(const OCIO::Processor *processor,
     }
 
     if (processor) {
-      const OCIO::PackedImageDesc desc((float *)float_pixels.data(), num_rows * width, 1, 4);
+      OCIO::PackedImageDesc desc((float *)float_pixels.data(), num_rows * width, 1, 4);
       device_processor->apply(desc);
     }
 
@@ -561,7 +567,7 @@ inline void processor_apply_pixels_grayscale(const OCIO::Processor *processor,
     }
 
     if (processor) {
-      const OCIO::PackedImageDesc desc((float *)float_pixels.data(), num_rows * width, 1, 3);
+      OCIO::PackedImageDesc desc((float *)float_pixels.data(), num_rows * width, 1, 3);
       device_processor->apply(desc);
     }
 

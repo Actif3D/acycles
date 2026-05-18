@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 #include <fmt/format.h>
 
@@ -128,7 +129,8 @@ static bool resize_block_(OIIO::ImageBuf &dst,
   int x0 = roi.xbegin, x1 = roi.xend, y0 = roi.ybegin, y1 = roi.yend;
 
   const ImageSpec &dstspec(dst.spec());
-  OIIO::span<float> pel = OIIO::OIIO_ALLOCA_SPAN(float, dstspec.nchannels);
+  std::vector<float> pel_storage(dstspec.nchannels);
+  OIIO::span<float> pel(pel_storage.data(), pel_storage.size());
   float xoffset = (float)dstspec.x;
   float yoffset = (float)dstspec.y;
   float xscale = 1.0f / (float)dstspec.width;
@@ -244,8 +246,8 @@ static bool resize_block(OIIO::ImageBuf &dst,
 static void fix_latl_edges(OIIO::ImageBuf &buf)
 {
   int n = buf.nchannels();
-  OIIO::span<float> left = OIIO::OIIO_ALLOCA_SPAN(float, n);
-  OIIO::span<float> right = OIIO::OIIO_ALLOCA_SPAN(float, n);
+  std::vector<float> left(n);
+  std::vector<float> right(n);
 
   /* Make the whole first and last row be solid, since they are exactly on the pole. */
   float wscale = 1.0f / (buf.spec().width);
@@ -256,7 +258,7 @@ static void fix_latl_edges(OIIO::ImageBuf &buf)
       left[c] = 0.0f;
     }
     for (int x = buf.xbegin(); x < buf.xend(); ++x) {
-      buf.getpixel(x, y, right);
+      buf.getpixel(x, y, right.data(), n);
       for (int c = 0; c < n; ++c) {
         left[c] += right[c];
       }
@@ -265,19 +267,19 @@ static void fix_latl_edges(OIIO::ImageBuf &buf)
       left[c] *= wscale;
     }
     for (int x = buf.xbegin(); x < buf.xend(); ++x) {
-      buf.setpixel(x, y, left);
+      buf.setpixel(x, y, left.data());
     }
   }
 
   /* Make the left and right match, since they are both right on the prime meridian. */
   for (int y = buf.ybegin(); y < buf.yend(); ++y) {
-    buf.getpixel(buf.xbegin(), y, left);
-    buf.getpixel(buf.xend() - 1, y, right);
+    buf.getpixel(buf.xbegin(), y, left.data(), n);
+    buf.getpixel(buf.xend() - 1, y, right.data(), n);
     for (int c = 0; c < n; ++c) {
       left[c] = 0.5f * left[c] + 0.5f * right[c];
     }
-    buf.setpixel(buf.xbegin(), y, left);
-    buf.setpixel(buf.xend() - 1, y, left);
+    buf.setpixel(buf.xbegin(), y, left.data());
+    buf.setpixel(buf.xend() - 1, y, left.data());
   }
 }
 
