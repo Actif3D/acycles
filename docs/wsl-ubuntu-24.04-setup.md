@@ -73,9 +73,69 @@ The helper runs CMake with `WITH_LIBS_PRECOMPILED=OFF` and disables the optional
 features listed above. This avoids the Python 3.13/USD dependency path and uses
 Ubuntu packages instead of Blender's precompiled libraries.
 
+## NVIDIA CUDA Devices
+
+The minimal helper intentionally disables CUDA:
+
+```cmake
+WITH_CYCLES_DEVICE_CUDA=OFF
+WITH_CYCLES_DEVICE_OPTIX=OFF
+```
+
+With those flags, `./install/cycles --list-devices` will only show `CPU`, even
+on a machine with an NVIDIA RTX card.
+
+For an RTX 3060, first verify the NVIDIA driver is visible:
+
+```bash
+nvidia-smi
+```
+
+Then configure with CUDA enabled. This enables runtime CUDA loading without
+building CUDA kernel binaries at compile time:
+
+```bash
+rm -rf build
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DWITH_LIBS_PRECOMPILED=OFF \
+  -DWITH_CYCLES_ALEMBIC=OFF \
+  -DWITH_CYCLES_EMBREE=OFF \
+  -DWITH_CYCLES_OPENIMAGEDENOISE=OFF \
+  -DWITH_CYCLES_OPENSUBDIV=OFF \
+  -DWITH_CYCLES_OPENVDB=OFF \
+  -DWITH_CYCLES_NANOVDB=OFF \
+  -DWITH_CYCLES_OSL=OFF \
+  -DWITH_USD=OFF \
+  -DWITH_CYCLES_USD=OFF \
+  -DWITH_CYCLES_HYDRA_RENDER_DELEGATE=OFF \
+  -DWITH_CYCLES_DEVICE_CUDA=ON \
+  -DWITH_CUDA_DYNLOAD=ON \
+  -DWITH_CYCLES_CUDA_BINARIES=OFF \
+  -DWITH_CYCLES_DEVICE_OPTIX=OFF \
+  -DWITH_CYCLES_DEVICE_HIP=OFF \
+  -DWITH_CYCLES_DEVICE_ONEAPI=OFF
+cmake --build build -j"$(nproc)" --target install
+./install/cycles --list-devices
+```
+
+To build CUDA binaries for RTX 3060 at compile time, install the CUDA toolkit
+with `nvcc` and use:
+
+```cmake
+WITH_CYCLES_CUDA_BINARIES=ON
+CYCLES_CUDA_BINARIES_ARCH=sm_86
+```
+
+OptiX is separate from CUDA and requires the NVIDIA OptiX SDK plus
+`WITH_CYCLES_DEVICE_OPTIX=ON`.
+
 ## Notes From Setup
 
 - `zlib1g` is only the runtime package. CMake needs `zlib1g-dev`.
+- `libimath-dev` replaces/conflicts with the older `libilmbase-dev`. If apt
+  reports `libimath-dev : Conflicts: libilmbase-dev`, remove the old package
+  first with `sudo apt remove libilmbase-dev`.
 - `libopenimageio-dev` references tool targets such as `/usr/bin/iconvert`;
   install `openimageio-tools` with it.
 - `libopenimageio-dev` on Ubuntu 24.04 references `/usr/include/opencv4`;
