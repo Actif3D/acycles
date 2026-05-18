@@ -96,7 +96,7 @@ building CUDA kernel binaries at compile time:
 
 ```bash
 rm -rf build
-cmake -S . -B build -G Ninja \
+cmake -S . -B "${build_dir}" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DWITH_LIBS_PRECOMPILED=OFF \
   -DWITH_CYCLES_ALEMBIC=OFF \
@@ -109,10 +109,9 @@ cmake -S . -B build -G Ninja \
   -DWITH_USD=OFF \
   -DWITH_CYCLES_USD=OFF \
   -DWITH_CYCLES_HYDRA_RENDER_DELEGATE=OFF \
+  -DWITH_STRICT_BUILD_OPTIONS=ON \
   -DWITH_CYCLES_DEVICE_CUDA=ON \
-  -DWITH_CUDA_DYNLOAD=ON \
-  -DWITH_CYCLES_CUDA_BINARIES=OFF \
-  -DWITH_CYCLES_DEVICE_OPTIX=OFF \
+  -DWITH_CYCLES_DEVICE_OPTIX=ON \
   -DWITH_CYCLES_DEVICE_HIP=OFF \
   -DWITH_CYCLES_DEVICE_ONEAPI=OFF
 cmake --build build -j"$(nproc)" --target install
