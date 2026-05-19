@@ -79,6 +79,8 @@ acycles \
 | `--height` | override height |
 | `--threads` | CPU thread count |
 | `--tile-size` | tile size |
+| `--max-diffuse-bounces` | Studio/SparkTrace-compatible diffuse bounce limit |
+| `--max-transparent-bounces` | Studio/SparkTrace-compatible transparent bounce limit |
 | `--denoise` | enable denoising |
 | `--quiet` | suppress verbose logs |
 

@@ -54,6 +54,7 @@ struct Options {
   bool list_capabilities;
   A3DSceneReaderOptions a3d_options;
   int max_bounce;
+  int max_diffuse_bounce;
   int transparent_max_bounce;
   float sample_clamp_direct;
   float sample_clamp_indirect;
@@ -158,6 +159,9 @@ static void scene_init()
 
   if (options.max_bounce >= 0) {
     options.scene->integrator->set_max_bounce(options.max_bounce);
+  }
+  if (options.max_diffuse_bounce >= 0) {
+    options.scene->integrator->set_max_diffuse_bounce(options.max_diffuse_bounce);
   }
   if (options.transparent_max_bounce >= 0) {
     options.scene->integrator->set_transparent_max_bounce(options.transparent_max_bounce);
@@ -449,6 +453,7 @@ static void options_parse(const int argc, const char **argv)
   options.a3d_status_messages = false;
   options.list_capabilities = false;
   options.max_bounce = -1;
+  options.max_diffuse_bounce = -1;
   options.transparent_max_bounce = -1;
   options.sample_clamp_direct = -1.0f;
   options.sample_clamp_indirect = -1.0f;
@@ -564,9 +569,18 @@ static void options_parse(const int argc, const char **argv)
   ap.arg("--bounce-count %d:BOUNCES").help("Asset3D maximum path bounces").action([&](auto argv) {
     parse_int(argv, &options.max_bounce);
   });
+  ap.arg("--max-diffuse-bounces %d:BOUNCES")
+      .help("SparkTrace-compatible diffuse bounce limit")
+      .action([&](auto argv) { parse_int(argv, &options.max_diffuse_bounce); });
+  ap.arg("-max-diffuse-bounces %d:BOUNCES")
+      .help("SparkTrace-compatible diffuse bounce limit")
+      .action([&](auto argv) { parse_int(argv, &options.max_diffuse_bounce); });
   ap.arg("--transparent-bounce-count %d:BOUNCES").help("Asset3D transparent bounces").action([&](auto argv) {
     parse_int(argv, &options.transparent_max_bounce);
   });
+  ap.arg("--max-transparent-bounces %d:BOUNCES")
+      .help("SparkTrace-compatible transparent bounce limit")
+      .action([&](auto argv) { parse_int(argv, &options.transparent_max_bounce); });
   ap.arg("--clamp-direct-samples %f:VALUE").help("Asset3D direct sample clamp").action([&](auto argv) {
     parse_float(argv, &options.sample_clamp_direct);
   });
