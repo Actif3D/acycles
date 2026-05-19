@@ -98,8 +98,40 @@ static void session_print_status()
   }
 
   if (options.a3d_status_messages) {
+    static int last_done = -1;
+    static string last_status;
+
     const int done = int(progress * 100.0 + 0.5);
-    printf("progress: %s; total: 100; done: %d;\n", status.empty() ? "Rendering" : status.c_str(), done);
+    string public_status = status.empty() ? "Rendering" : status;
+
+    if (string_startswith(public_status, "Updating Geometry BVH") ||
+        string_startswith(public_status, "Updating Scene BVH") ||
+        string_startswith(public_status, "Updating Mesh"))
+    {
+      public_status = "Updating geometry";
+    }
+    else if (string_startswith(public_status, "Updating Images")) {
+      public_status = "Updating images";
+    }
+    else if (string_startswith(public_status, "Updating Lights")) {
+      public_status = "Updating lights";
+    }
+    else if (string_startswith(public_status, "Updating Device")) {
+      public_status = "Updating device";
+    }
+    else if (string_startswith(public_status, "Sample ")) {
+      public_status = "Rendering";
+    }
+
+    if (public_status == last_status) {
+      if (done == last_done || (done == 0 && public_status != "Rendering")) {
+        return;
+      }
+    }
+    last_done = done;
+    last_status = public_status;
+
+    printf("progress: %s; total: 100; done: %d;\n", public_status.c_str(), done);
     fflush(stdout);
     return;
   }
