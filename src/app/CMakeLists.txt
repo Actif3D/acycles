@@ -71,6 +71,8 @@ endif()
 if(WITH_CYCLES_STANDALONE)
   set(SRC
     cycles_standalone.cpp
+    a3d_scene_reader.cpp
+    a3d_scene_reader.h
     cycles_xml.cpp
     cycles_xml.h
     oiio_output_driver.cpp

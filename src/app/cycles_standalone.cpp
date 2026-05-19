@@ -27,6 +27,7 @@
 #  include "hydra/file_reader.h"
 #endif
 
+#include "app/a3d_scene_reader.h"
 #include "app/cycles_xml.h"
 #include "app/oiio_output_driver.h"
 
@@ -48,10 +49,24 @@ struct Options {
   bool show_help, interactive, pause;
   string output_filepath;
   string output_pass;
+  string a3d_scene_root;
+  bool a3d_status_messages;
+  bool list_capabilities;
+  A3DSceneReaderOptions a3d_options;
+  int max_bounce;
+  int transparent_max_bounce;
+  float sample_clamp_direct;
+  float sample_clamp_indirect;
 } options;
 
 static void session_print(const string &str)
 {
+  if (options.a3d_status_messages) {
+    printf("info: %s\n", str.c_str());
+    fflush(stdout);
+    return;
+  }
+
   /* print with carriage return to overwrite previous */
   printf("\r%s", str.c_str());
 
@@ -81,6 +96,13 @@ static void session_print_status()
     status += ": " + substatus;
   }
 
+  if (options.a3d_status_messages) {
+    const int done = int(progress * 100.0 + 0.5);
+    printf("progress: %s; total: 100; done: %d;\n", status.empty() ? "Rendering" : status.c_str(), done);
+    fflush(stdout);
+    return;
+  }
+
   /* print status */
   status = string_printf("Progress %05.2f   %s", progress * 100, status.c_str());
   session_print(status);
@@ -101,15 +123,50 @@ static void scene_init()
 {
   options.scene = options.session->scene.get();
 
-  /* Read XML or USD */
-#ifdef WITH_USD
-  if (!string_endswith(string_to_lower(options.filepath), ".xml")) {
-    HD_CYCLES_NS::HdCyclesFileReader::read(options.session.get(), options.filepath.c_str());
+  /* Read Asset3D, XML or USD. */
+  if (!options.a3d_scene_root.empty()) {
+    string error;
+    if (options.a3d_status_messages) {
+      printf("progress: Loading scene; total: 100; done: 0;\n");
+      fflush(stdout);
+    }
+    if (!a3d_read_scene(options.scene, options.a3d_scene_root, options.a3d_options, &error)) {
+      if (options.a3d_status_messages) {
+        printf("error: %s\n", error.c_str());
+      }
+      else {
+        fprintf(stderr, "%s\n", error.c_str());
+      }
+      exit(EXIT_FAILURE);
+    }
+    if (options.a3d_status_messages) {
+      printf("progress: Loading scene; total: 100; done: 100;\n");
+      fflush(stdout);
+    }
   }
-  else
+  else {
+#ifdef WITH_USD
+    if (!string_endswith(string_to_lower(options.filepath), ".xml")) {
+      HD_CYCLES_NS::HdCyclesFileReader::read(options.session.get(), options.filepath.c_str());
+    }
+    else
 #endif
-  {
-    xml_read_file(options.scene, options.filepath.c_str());
+    {
+      xml_read_file(options.scene, options.filepath.c_str());
+    }
+  }
+
+  if (options.max_bounce >= 0) {
+    options.scene->integrator->set_max_bounce(options.max_bounce);
+  }
+  if (options.transparent_max_bounce >= 0) {
+    options.scene->integrator->set_transparent_max_bounce(options.transparent_max_bounce);
+  }
+  if (options.sample_clamp_direct >= 0.0f) {
+    options.scene->integrator->set_sample_clamp_direct(options.sample_clamp_direct);
+  }
+  if (options.sample_clamp_indirect >= 0.0f) {
+    options.scene->integrator->set_sample_clamp_indirect(options.sample_clamp_indirect);
   }
 
   /* Camera width/height override? */
@@ -373,6 +430,12 @@ static void parse_string(OIIO::cspan<const char *> argv, std::string *s)
   *s = argv[1];
 }
 
+static void parse_float(OIIO::cspan<const char *> argv, float *f)
+{
+  assert(argv.size() == 2);
+  *f = float(atof(argv[1]));
+}
+
 static void options_parse(const int argc, const char **argv)
 {
   options.width = 1024;
@@ -382,6 +445,13 @@ static void options_parse(const int argc, const char **argv)
   options.quiet = false;
   options.session_params.use_auto_tile = false;
   options.session_params.tile_size = 0;
+  options.a3d_scene_root = "";
+  options.a3d_status_messages = false;
+  options.list_capabilities = false;
+  options.max_bounce = -1;
+  options.transparent_max_bounce = -1;
+  options.sample_clamp_direct = -1.0f;
+  options.sample_clamp_indirect = -1.0f;
 
   /* device names */
   string device_names;
@@ -408,7 +478,7 @@ static void options_parse(const int argc, const char **argv)
   bool version = false;
   string log_level;
 
-  ap.usage("cycles [options] file.xml");
+  ap.usage("acycles [options] file.xml | acycles --a3d-scene DIR --output render.exr");
   ap.arg("filename").hidden().action([&](auto argv) { options.filepath = argv[0]; });
   ap.arg("--device %s:DEVICE").help("Devices to use: " + device_names).action([&](auto argv) {
     parse_string(argv, &devicename);
@@ -427,6 +497,58 @@ static void options_parse(const int argc, const char **argv)
   ap.arg("--output %s:OUTPUT").help("File path to write output image").action([&](auto argv) {
     parse_string(argv, &options.output_filepath);
   });
+  ap.arg("--image-path %s:OUTPUT").help("Asset3D Studio alias for --output").action([&](auto argv) {
+    parse_string(argv, &options.output_filepath);
+  });
+  ap.arg("--a3d-scene %s:DIR").help("Asset3D scene folder to render").action([&](auto argv) {
+    parse_string(argv, &options.a3d_scene_root);
+  });
+  ap.arg("--status-messages", &options.a3d_status_messages)
+      .help("Emit Studio-compatible info:, progress: and error: lines");
+  ap.arg("--camera-x %f:X").help("Asset3D camera X position").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_position.x);
+    options.a3d_options.has_camera_position = true;
+  });
+  ap.arg("--camera-y %f:Y").help("Asset3D camera Y position").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_position.y);
+    options.a3d_options.has_camera_position = true;
+  });
+  ap.arg("--camera-z %f:Z").help("Asset3D camera Z position").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_position.z);
+    options.a3d_options.has_camera_position = true;
+  });
+  ap.arg("--camera-yaw %f:DEG").help("Asset3D camera yaw in degrees").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_yaw);
+    options.a3d_options.has_camera_rotation = true;
+  });
+  ap.arg("--camera-pitch %f:DEG").help("Asset3D camera pitch in degrees").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_pitch);
+    options.a3d_options.has_camera_rotation = true;
+  });
+  ap.arg("--camera-roll %f:DEG").help("Asset3D camera roll in degrees").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_roll);
+    options.a3d_options.has_camera_rotation = true;
+  });
+  ap.arg("--camera-fov %f:DEG").help("Asset3D camera vertical field of view in degrees").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.camera_fov);
+    options.a3d_options.has_camera_fov = true;
+  });
+  ap.arg("--bg-strength %f:VALUE").help("Asset3D background strength").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.bg_strength);
+    options.a3d_options.has_bg_strength = true;
+  });
+  ap.arg("--bg-color-r %f:R").help("Asset3D background red channel").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.bg_color.x);
+    options.a3d_options.has_bg_color = true;
+  });
+  ap.arg("--bg-color-g %f:G").help("Asset3D background green channel").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.bg_color.y);
+    options.a3d_options.has_bg_color = true;
+  });
+  ap.arg("--bg-color-b %f:B").help("Asset3D background blue channel").action([&](auto argv) {
+    parse_float(argv, &options.a3d_options.bg_color.z);
+    options.a3d_options.has_bg_color = true;
+  });
   ap.arg("--threads %d:THREADS").help("CPU Rendering Threads").action([&](auto argv) {
     parse_int(argv, &options.session_params.threads);
   });
@@ -439,7 +561,30 @@ static void options_parse(const int argc, const char **argv)
   ap.arg("--tile-size %d:TILE_SIZE").help("Tile size in pixels").action([&](auto argv) {
     parse_int(argv, &options.session_params.tile_size);
   });
+  ap.arg("--bounce-count %d:BOUNCES").help("Asset3D maximum path bounces").action([&](auto argv) {
+    parse_int(argv, &options.max_bounce);
+  });
+  ap.arg("--transparent-bounce-count %d:BOUNCES").help("Asset3D transparent bounces").action([&](auto argv) {
+    parse_int(argv, &options.transparent_max_bounce);
+  });
+  ap.arg("--clamp-direct-samples %f:VALUE").help("Asset3D direct sample clamp").action([&](auto argv) {
+    parse_float(argv, &options.sample_clamp_direct);
+  });
+  ap.arg("--clamp-indirect-samples %f:VALUE").help("Asset3D indirect sample clamp").action([&](auto argv) {
+    parse_float(argv, &options.sample_clamp_indirect);
+  });
+  ap.arg("--bg-map %s:PATH").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--bg-map-gamma %f:GAMMA").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--bg-map-yaw %f:DEG").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--bg-map-mis_resolution %d:RES").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--ambient-light-strength %f:VALUE").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--ambient-occlusion-distance %f:VALUE").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--ambient-occlusion-intensity %f:VALUE").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--light-tree").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
+  ap.arg("--live-lightmap-index %d:INDEX").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--list-devices", &list).help("List information about all available devices");
+  ap.arg("--list-capabilities", &options.list_capabilities)
+      .help("Print Asset3D Studio-compatible renderer capabilities");
   ap.arg("--profile", &profile).help("Enable profile logging");
   ap.arg("--log-level %s:LEVEL")
       .help("Log verbosity: fatal, error, warning, info, stats, debug")
@@ -455,6 +600,21 @@ static void options_parse(const int argc, const char **argv)
 
   if (!log_level.empty()) {
     log_level_set(log_level);
+  }
+
+  if (options.list_capabilities) {
+    const vector<DeviceInfo> devices = Device::available_devices();
+    printf("[OIDN support]\n");
+    printf("false\n");
+    printf("[Devices]\n");
+    for (const DeviceInfo &info : devices) {
+      printf("%s;%s;%s%s\n",
+             info.id.c_str(),
+             Device::string_from_type(info.type).c_str(),
+             info.description.c_str(),
+             (info.display_device) ? " (display)" : "");
+    }
+    exit(EXIT_SUCCESS);
   }
 
   if (list) {
@@ -474,7 +634,7 @@ static void options_parse(const int argc, const char **argv)
     printf("%s\n", CYCLES_VERSION_STRING);
     exit(EXIT_SUCCESS);
   }
-  else if (help || options.filepath.empty()) {
+  else if (help || (options.filepath.empty() && options.a3d_scene_root.empty())) {
     ap.print_help();
     exit(EXIT_SUCCESS);
   }
@@ -491,6 +651,14 @@ static void options_parse(const int argc, const char **argv)
 #ifndef WITH_CYCLES_STANDALONE_GUI
   options.session_params.background = true;
 #endif
+
+  if (!options.a3d_scene_root.empty() && options.output_filepath.empty()) {
+    options.output_filepath = path_join(path_join(options.a3d_scene_root, "tmp"), "render.exr");
+  }
+  if (!options.output_filepath.empty() && !path_create_directories(options.output_filepath)) {
+    fprintf(stderr, "Unable to create output directory for %s\n", options.output_filepath.c_str());
+    exit(EXIT_FAILURE);
+  }
 
   if (options.session_params.tile_size > 0) {
     options.session_params.use_auto_tile = true;
@@ -527,7 +695,7 @@ static void options_parse(const int argc, const char **argv)
     fprintf(stderr, "Invalid number of samples: %d\n", options.session_params.samples);
     exit(EXIT_FAILURE);
   }
-  else if (options.filepath.empty()) {
+  else if (options.filepath.empty() && options.a3d_scene_root.empty()) {
     fprintf(stderr, "No file path specified\n");
     exit(EXIT_FAILURE);
   }

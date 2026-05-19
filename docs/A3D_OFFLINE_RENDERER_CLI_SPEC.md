@@ -33,17 +33,15 @@ The initial implementation should preserve compatibility with the current subpro
 
 Renderer should emit machine-readable status lines.
 
-Recommended format:
+The implemented `acycles --status-messages` mode intentionally matches the current Asset3D Studio subprocess parser:
 
 ```text
-[progress] 12.5
-[status] Rendering
-[info] Loading textures
-[warning] Missing texture
-[error] Invalid mesh
+info: Loading textures
+progress: Rendering; total: 100; done: 12;
+error: Invalid mesh
 ```
 
-Human-only carriage-return progress output should not be the only progress mechanism.
+For compatibility, Studio-facing stdout should contain only `info:`, `progress:`, or `error:` lines. Human-only carriage-return progress output should not be the only progress mechanism.
 
 ## Cancellation
 
@@ -69,6 +67,7 @@ acycles \
 |---|---|
 | `--a3d-scene` | Asset3D scene root folder |
 | `--output` | output image path |
+| `--image-path` | Studio-compatible alias for `--output` |
 
 ## Optional arguments
 
@@ -124,19 +123,16 @@ acycles \
 acycles --list-capabilities
 ```
 
-## Recommended output
+## Implemented output
 
-```json
-{
-  "oidnSupport": true,
-  "devices": [
-    {
-      "id": "CUDA_0",
-      "type": "CUDA",
-      "name": "NVIDIA RTX 4090"
-    }
-  ]
-}
+The current Studio integration expects the legacy SparkTrace text format:
+
+```text
+[OIDN support]
+false
+[Devices]
+CUDA_0;CUDA;NVIDIA RTX 4090
+CPU;CPU;CPU description
 ```
 
 ---
