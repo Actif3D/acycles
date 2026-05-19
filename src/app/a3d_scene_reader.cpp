@@ -509,27 +509,150 @@ bool decode_uv0(const MeshProps &mp, const vector<uint8_t> &uvs0, const int inde
   return true;
 }
 
-bool decode_meshopt_faces(const vector<uint8_t> &encoded_faces,
-                          const std::vector<MeshProps> &mesh_props,
-                          vector<uint8_t> &faces16,
-                          vector<uint8_t> &faces32,
-                          string *error)
+struct FaceRange {
+  size_t offset = 0;
+  int face_cnt = 0;
+  bool use_faces16 = false;
+  int node_id = 0;
+};
+
+bool append_face_range(std::vector<FaceRange> &ranges, const MeshProps &mp)
 {
-  size_t total_indices = 0;
-  size_t faces16_size = 0;
-  size_t faces32_size = 0;
+  if (mp.face_cnt <= 0) {
+    return true;
+  }
+  FaceRange range;
+  range.offset = size_t(mp.face_byte_offset) / (mp.use_faces16 ? sizeof(uint16_t) : sizeof(uint32_t));
+  range.face_cnt = mp.face_cnt;
+  range.use_faces16 = mp.use_faces16;
+  range.node_id = mp.node_id;
+  ranges.push_back(range);
+  return true;
+}
+
+void size_face_buffers(const std::vector<MeshProps> &mesh_props, size_t *faces16_size, size_t *faces32_size)
+{
+  *faces16_size = 0;
+  *faces32_size = 0;
   for (const MeshProps &mp : mesh_props) {
     if (mp.face_cnt <= 0) {
       continue;
     }
     const size_t index_count = size_t(mp.face_cnt) * 3;
-    total_indices += index_count;
     if (mp.use_faces16) {
-      faces16_size = max(faces16_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint16_t));
+      *faces16_size = max(*faces16_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint16_t));
     }
     else {
-      faces32_size = max(faces32_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint32_t));
+      *faces32_size = max(*faces32_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint32_t));
     }
+  }
+}
+
+bool copy_decoded_indices(const FaceRange &range,
+                          const std::vector<uint32_t> &decoded,
+                          vector<uint8_t> &faces16,
+                          vector<uint8_t> &faces32,
+                          string *error)
+{
+  const size_t index_count = size_t(range.face_cnt) * 3;
+  if (range.use_faces16) {
+    const size_t byte_offset = range.offset * sizeof(uint16_t);
+    for (size_t i = 0; i < index_count; i++) {
+      const uint32_t value = decoded[i];
+      if (value > 0xffffu) {
+        *error = string_printf("Decoded faces16 index out of range in mesh node_id=%d", range.node_id);
+        return false;
+      }
+      const uint16_t packed = uint16_t(value);
+      memcpy(faces16.data() + byte_offset + i * sizeof(uint16_t), &packed, sizeof(uint16_t));
+    }
+  }
+  else {
+    const size_t byte_offset = range.offset * sizeof(uint32_t);
+    memcpy(faces32.data() + byte_offset, decoded.data(), index_count * sizeof(uint32_t));
+  }
+  return true;
+}
+
+bool decode_meshopt_segmented_faces(const vector<uint8_t> &encoded_faces,
+                                    const std::vector<MeshProps> &mesh_props,
+                                    vector<uint8_t> &faces16,
+                                    vector<uint8_t> &faces32,
+                                    string *error)
+{
+  std::vector<FaceRange> ranges16, ranges32;
+  for (const MeshProps &mp : mesh_props) {
+    append_face_range(mp.use_faces16 ? ranges16 : ranges32, mp);
+  }
+
+  const auto sort_by_offset = [](const FaceRange &a, const FaceRange &b) { return a.offset < b.offset; };
+  std::sort(ranges16.begin(), ranges16.end(), sort_by_offset);
+  std::sort(ranges32.begin(), ranges32.end(), sort_by_offset);
+
+  size_t faces16_size = 0, faces32_size = 0;
+  size_face_buffers(mesh_props, &faces16_size, &faces32_size);
+  faces16.assign(faces16_size, 0);
+  faces32.assign(faces32_size, 0);
+
+  size_t cursor = 0;
+  bool have_last = false;
+  FaceRange last_range;
+  std::vector<FaceRange> all_ranges = ranges16;
+  all_ranges.insert(all_ranges.end(), ranges32.begin(), ranges32.end());
+
+  for (const FaceRange &range : all_ranges) {
+    if (range.face_cnt == 0) {
+      continue;
+    }
+    if (have_last && last_range.offset == range.offset && last_range.use_faces16 == range.use_faces16) {
+      continue;
+    }
+    have_last = true;
+    last_range = range;
+
+    if (cursor + sizeof(uint32_t) > encoded_faces.size()) {
+      *error = "Segmented meshopt faces.buf ended before segment length";
+      return false;
+    }
+    const uint32_t byte_length = read_pod<uint32_t>(encoded_faces, cursor);
+    cursor += sizeof(uint32_t);
+    if (cursor + byte_length > encoded_faces.size()) {
+      *error = "Segmented meshopt faces.buf segment exceeds buffer size";
+      return false;
+    }
+
+    const size_t index_count = size_t(range.face_cnt) * 3;
+    std::vector<uint32_t> decoded(index_count);
+    const int rc = meshopt_decodeIndexBuffer(
+        decoded.data(), index_count, sizeof(uint32_t), encoded_faces.data() + cursor, byte_length);
+    if (rc != 0) {
+      *error = string_printf(
+          "meshopt_decodeIndexBuffer failed for faces.buf segment node_id=%d with code %d",
+          range.node_id,
+          rc);
+      return false;
+    }
+    cursor += byte_length;
+
+    if (!copy_decoded_indices(range, decoded, faces16, faces32, error)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool decode_meshopt_single_stream_faces(const vector<uint8_t> &encoded_faces,
+                                        const std::vector<MeshProps> &mesh_props,
+                                        vector<uint8_t> &faces16,
+                                        vector<uint8_t> &faces32,
+                                        string *error)
+{
+  size_t total_indices = 0;
+  size_t faces16_size = 0, faces32_size = 0;
+  size_face_buffers(mesh_props, &faces16_size, &faces32_size);
+  for (const MeshProps &mp : mesh_props) {
+    total_indices += size_t(max(mp.face_cnt, 0)) * 3;
   }
 
   std::vector<uint32_t> decoded(total_indices);
@@ -545,34 +668,45 @@ bool decode_meshopt_faces(const vector<uint8_t> &encoded_faces,
 
   size_t decoded_offset = 0;
   for (const MeshProps &mp : mesh_props) {
-    const size_t index_count = size_t(mp.face_cnt) * 3;
+    const size_t index_count = size_t(max(mp.face_cnt, 0)) * 3;
     if (index_count == 0) {
       continue;
     }
-
-    if (mp.use_faces16) {
-      for (size_t i = 0; i < index_count; i++) {
-        const uint32_t value = decoded[decoded_offset + i];
-        if (value > 0xffffu) {
-          *error = string_printf("Decoded faces16 index out of range in mesh node_id=%d", mp.node_id);
-          return false;
-        }
-        const uint16_t packed = uint16_t(value);
-        memcpy(faces16.data() + size_t(mp.face_byte_offset) + i * sizeof(uint16_t),
-               &packed,
-               sizeof(uint16_t));
-      }
+    FaceRange range;
+    range.offset = size_t(mp.face_byte_offset) / (mp.use_faces16 ? sizeof(uint16_t) : sizeof(uint32_t));
+    range.face_cnt = mp.face_cnt;
+    range.use_faces16 = mp.use_faces16;
+    range.node_id = mp.node_id;
+    std::vector<uint32_t> segment(decoded.begin() + decoded_offset, decoded.begin() + decoded_offset + index_count);
+    if (!copy_decoded_indices(range, segment, faces16, faces32, error)) {
+      return false;
     }
-    else {
-      memcpy(faces32.data() + size_t(mp.face_byte_offset),
-             decoded.data() + decoded_offset,
-             index_count * sizeof(uint32_t));
-    }
-
     decoded_offset += index_count;
   }
 
   return true;
+}
+
+bool decode_meshopt_faces(const vector<uint8_t> &encoded_faces,
+                          const std::vector<MeshProps> &mesh_props,
+                          vector<uint8_t> &faces16,
+                          vector<uint8_t> &faces32,
+                          string *error)
+{
+  string segmented_error;
+  if (decode_meshopt_segmented_faces(encoded_faces, mesh_props, faces16, faces32, &segmented_error)) {
+    return true;
+  }
+
+  string single_stream_error;
+  if (decode_meshopt_single_stream_faces(
+          encoded_faces, mesh_props, faces16, faces32, &single_stream_error))
+  {
+    return true;
+  }
+
+  *error = segmented_error + "; " + single_stream_error;
+  return false;
 }
 
 bool decode_index(const MeshProps &mp,
