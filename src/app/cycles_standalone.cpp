@@ -65,6 +65,51 @@ struct Options {
   float sample_clamp_indirect;
 } options;
 
+static vector<float> a3d_preview_result;
+
+class A3DPreviewOutputDriver : public OutputDriver {
+ public:
+  explicit A3DPreviewOutputDriver(unique_ptr<OutputDriver> delegate) : delegate_(std::move(delegate)) {}
+
+  void write_render_tile(const Tile &tile) override
+  {
+    if (delegate_) {
+      delegate_->write_render_tile(tile);
+    }
+
+    if (!(tile.size == tile.full_size)) {
+      return;
+    }
+
+    const int width = tile.size.x;
+    const int height = tile.size.y;
+    vector<float> rgba(size_t(width) * size_t(height) * 4);
+    if (!tile.get_pass_pixels(options.output_pass, 4, rgba.data())) {
+      fprintf(stderr, "Failed to read preview render pass pixels\n");
+      return;
+    }
+
+    a3d_preview_result.assign(size_t(3) + size_t(width) * size_t(height) * 3, 0.0f);
+    a3d_preview_result[1] = float(width);
+    a3d_preview_result[2] = float(height);
+
+    float *rgb = a3d_preview_result.data() + 3;
+    for (int y = 0; y < height; ++y) {
+      const int src_y = height - 1 - y;
+      const float *src = rgba.data() + size_t(src_y) * size_t(width) * 4;
+      float *dst = rgb + size_t(y) * size_t(width) * 3;
+      for (int x = 0; x < width; ++x) {
+        dst[x * 3 + 0] = src[x * 4 + 0];
+        dst[x * 3 + 1] = src[x * 4 + 1];
+        dst[x * 3 + 2] = src[x * 4 + 2];
+      }
+    }
+  }
+
+ private:
+  unique_ptr<OutputDriver> delegate_;
+};
+
 static void configure_status_stdout()
 {
 #ifdef _WIN32
@@ -246,8 +291,12 @@ static void session_init()
 #endif
 
   if (!options.output_filepath.empty()) {
-    options.session->set_output_driver(make_unique<OIIOOutputDriver>(
-        options.output_filepath, options.output_pass, session_print));
+    unique_ptr<OutputDriver> output_driver = make_unique<OIIOOutputDriver>(
+        options.output_filepath, options.output_pass, session_print);
+    if (options.a3d_status_messages) {
+      output_driver = make_unique<A3DPreviewOutputDriver>(std::move(output_driver));
+    }
+    options.session->set_output_driver(std::move(output_driver));
   }
 
   if (options.session_params.background && !options.quiet) {
@@ -277,17 +326,15 @@ static void emit_a3d_result()
     return;
   }
 
-  vector<uint8_t> result;
-  if (!path_read_binary(options.output_filepath, result)) {
-    printf("error: Failed to read render result %s\n", options.output_filepath.c_str());
+  if (a3d_preview_result.empty()) {
+    printf("error: Failed to read render preview result\n");
     fflush(stdout);
     return;
   }
 
-  printf("progress: Rendering complete; total: 1; done: 1; result_size: %zu;\n", result.size());
-  if (!result.empty()) {
-    fwrite(result.data(), sizeof(uint8_t), result.size(), stdout);
-  }
+  const size_t result_size = a3d_preview_result.size() * sizeof(float);
+  printf("progress: Rendering complete; total: 1; done: 1; result_size: %zu;\n", result_size);
+  fwrite(a3d_preview_result.data(), sizeof(float), a3d_preview_result.size(), stdout);
   fflush(stdout);
 }
 
