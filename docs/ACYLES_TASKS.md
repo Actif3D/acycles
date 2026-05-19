@@ -4,50 +4,51 @@
 
 ### CLI
 
-- [ ] Add `--a3d-scene`
-- [ ] Add machine-readable progress output
-- [ ] Add stable exit codes
-- [ ] Add output-path validation
+- [x] Add `--a3d-scene`
+- [x] Add machine-readable progress output
+- [x] Add stable exit codes
+- [x] Add output-path validation
 
 ### Scene Reader
 
-- [ ] Create Asset3D scene reader module
-- [ ] Load scene package
-- [ ] Load geometry buffers
-- [ ] Load transforms
-- [ ] Load camera
-- [ ] Load lights
-- [ ] Load textures
+- [x] Create Asset3D scene reader module
+- [x] Load scene package
+- [x] Load geometry buffers
+- [ ] Decode meshopt-compressed `faces.buf` packages
+- [x] Load transforms
+- [x] Load camera
+- [x] Load lights
+- [x] Load textures
 
 ### Geometry
 
-- [ ] Construct Cycles meshes
-- [ ] Construct Cycles objects
-- [ ] Validate indices
-- [ ] Validate UVs
-- [ ] Validate normals
+- [x] Construct Cycles meshes
+- [x] Construct Cycles objects
+- [x] Validate indices
+- [x] Validate UVs
+- [x] Validate normals
 
 ### Materials
 
-- [ ] Base color
-- [ ] Roughness
-- [ ] Metallic
-- [ ] Normal maps
-- [ ] Emissive
-- [ ] Opacity/cutout
+- [x] Base color
+- [x] Roughness
+- [x] Metallic
+- [x] Normal maps
+- [x] Emissive
+- [x] Opacity/cutout
 
 ### Rendering
 
-- [ ] EXR output
-- [ ] CPU rendering
+- [x] EXR output
+- [x] CPU rendering
 - [ ] CUDA rendering
-- [ ] Device enumeration
+- [x] Device enumeration
 
 ### Integration
 
 - [ ] Test with Asset3D Studio preview pipeline
-- [ ] Verify render path compatibility
-- [ ] Verify subprocess progress parsing
+- [x] Verify render path compatibility
+- [x] Verify subprocess progress parsing
 
 ---
 
