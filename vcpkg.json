@@ -1,0 +1,16 @@
+{
+  "builtin-baseline": "600e1197b22d416d9b8486da170b0558c05703ff",
+  "dependencies": [
+    "fmt",
+    "libjpeg-turbo",
+    "libpng",
+    "openexr",
+    "openimageio",
+    "opencolorio",
+    "openjpeg",
+    "pugixml",
+    "tbb",
+    "zlib",
+    "zstd"
+  ]
+}
