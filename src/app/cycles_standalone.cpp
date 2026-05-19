@@ -257,6 +257,26 @@ static void session_init()
   options.session->start();
 }
 
+static void emit_a3d_result()
+{
+  if (!options.a3d_status_messages || options.output_filepath.empty()) {
+    return;
+  }
+
+  vector<uint8_t> result;
+  if (!path_read_binary(options.output_filepath, result)) {
+    printf("error: Failed to read render result %s\n", options.output_filepath.c_str());
+    fflush(stdout);
+    return;
+  }
+
+  printf("progress: Rendering complete; total: 1; done: 1; result_size: %zu;\n", result.size());
+  if (!result.empty()) {
+    fwrite(result.data(), sizeof(uint8_t), result.size(), stdout);
+  }
+  fflush(stdout);
+}
+
 static void session_exit()
 {
   if (options.session) {
@@ -265,8 +285,12 @@ static void session_exit()
 
   if (options.session_params.background && !options.quiet) {
     session_print("Finished Rendering.");
-    printf("\n");
+    if (!options.a3d_status_messages) {
+      printf("\n");
+    }
   }
+
+  emit_a3d_result();
 }
 
 #ifdef WITH_CYCLES_STANDALONE_GUI
