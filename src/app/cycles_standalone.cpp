@@ -616,6 +616,13 @@ static void options_parse(const int argc, const char **argv)
     log_level_set(log_level);
   }
 
+  if (options.a3d_scene_root.empty() && !options.filepath.empty() &&
+      path_is_directory(options.filepath) && path_exists(path_join(options.filepath, "scene.json")))
+  {
+    options.a3d_scene_root = options.filepath;
+    options.filepath = "";
+  }
+
   if (options.list_capabilities) {
     const vector<DeviceInfo> devices = Device::available_devices();
     printf("[OIDN support]\n");

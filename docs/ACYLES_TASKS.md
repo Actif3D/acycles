@@ -14,7 +14,7 @@
 - [x] Create Asset3D scene reader module
 - [x] Load scene package
 - [x] Load geometry buffers
-- [ ] Decode meshopt-compressed `faces.buf` packages
+- [x] Decode meshopt-compressed `faces.buf` packages
 - [x] Load transforms
 - [x] Load camera
 - [x] Load lights
@@ -41,7 +41,7 @@
 
 - [x] EXR output
 - [x] CPU rendering
-- [ ] CUDA rendering
+- [x] CUDA rendering
 - [x] Device enumeration
 
 ### Integration
@@ -49,6 +49,7 @@
 - [ ] Test with Asset3D Studio preview pipeline
 - [x] Verify render path compatibility
 - [x] Verify subprocess progress parsing
+- [x] Studio positional scene-folder invocation verified
 
 ---
 

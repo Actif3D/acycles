@@ -68,6 +68,7 @@ acycles \
 | `--a3d-scene` | Asset3D scene root folder |
 | `--output` | output image path |
 | `--image-path` | Studio-compatible alias for `--output` |
+| positional scene folder | Studio-compatible alias for `--a3d-scene` when the path is a directory containing `scene.json` |
 
 ## Optional arguments
 

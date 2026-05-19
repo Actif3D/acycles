@@ -31,6 +31,8 @@
 #include "util/transform.h"
 #include "util/vector.h"
 
+#include "meshoptimizer.h"
+
 CCL_NAMESPACE_BEGIN
 
 namespace {
@@ -507,6 +509,72 @@ bool decode_uv0(const MeshProps &mp, const vector<uint8_t> &uvs0, const int inde
   return true;
 }
 
+bool decode_meshopt_faces(const vector<uint8_t> &encoded_faces,
+                          const std::vector<MeshProps> &mesh_props,
+                          vector<uint8_t> &faces16,
+                          vector<uint8_t> &faces32,
+                          string *error)
+{
+  size_t total_indices = 0;
+  size_t faces16_size = 0;
+  size_t faces32_size = 0;
+  for (const MeshProps &mp : mesh_props) {
+    if (mp.face_cnt <= 0) {
+      continue;
+    }
+    const size_t index_count = size_t(mp.face_cnt) * 3;
+    total_indices += index_count;
+    if (mp.use_faces16) {
+      faces16_size = max(faces16_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint16_t));
+    }
+    else {
+      faces32_size = max(faces32_size, size_t(mp.face_byte_offset) + index_count * sizeof(uint32_t));
+    }
+  }
+
+  std::vector<uint32_t> decoded(total_indices);
+  const int rc = meshopt_decodeIndexBuffer(
+      decoded.data(), total_indices, sizeof(uint32_t), encoded_faces.data(), encoded_faces.size());
+  if (rc != 0) {
+    *error = string_printf("meshopt_decodeIndexBuffer failed for faces.buf with code %d", rc);
+    return false;
+  }
+
+  faces16.assign(faces16_size, 0);
+  faces32.assign(faces32_size, 0);
+
+  size_t decoded_offset = 0;
+  for (const MeshProps &mp : mesh_props) {
+    const size_t index_count = size_t(mp.face_cnt) * 3;
+    if (index_count == 0) {
+      continue;
+    }
+
+    if (mp.use_faces16) {
+      for (size_t i = 0; i < index_count; i++) {
+        const uint32_t value = decoded[decoded_offset + i];
+        if (value > 0xffffu) {
+          *error = string_printf("Decoded faces16 index out of range in mesh node_id=%d", mp.node_id);
+          return false;
+        }
+        const uint16_t packed = uint16_t(value);
+        memcpy(faces16.data() + size_t(mp.face_byte_offset) + i * sizeof(uint16_t),
+               &packed,
+               sizeof(uint16_t));
+      }
+    }
+    else {
+      memcpy(faces32.data() + size_t(mp.face_byte_offset),
+             decoded.data() + decoded_offset,
+             index_count * sizeof(uint32_t));
+    }
+
+    decoded_offset += index_count;
+  }
+
+  return true;
+}
+
 bool decode_index(const MeshProps &mp,
                   const vector<uint8_t> &faces16,
                   const vector<uint8_t> &faces32,
@@ -882,11 +950,18 @@ bool a3d_read_scene(Scene *scene,
 
     vector<uint8_t> faces16_buf, faces32_buf;
     if (mesh_version >= 3) {
-      if (!read_optional_buffer(scene_root, "faces16.buf", faces16_buf) ||
-          !read_optional_buffer(scene_root, "faces.buf", faces32_buf))
-      {
-        *error = "Asset3D meshopt-compressed faces.buf is not supported yet; provide uncompressed faces16.buf and faces.buf";
+      vector<uint8_t> encoded_faces;
+      if (!read_buffer(scene_root, "faces.buf", encoded_faces, error)) {
         return false;
+      }
+      string decode_error;
+      if (!decode_meshopt_faces(encoded_faces, mesh_props, faces16_buf, faces32_buf, &decode_error)) {
+        const bool has_faces16 = read_optional_buffer(scene_root, "faces16.buf", faces16_buf);
+        const bool has_faces32 = read_optional_buffer(scene_root, "faces.buf", faces32_buf);
+        if (!(has_faces16 && has_faces32)) {
+          *error = decode_error;
+          return false;
+        }
       }
     }
     else {

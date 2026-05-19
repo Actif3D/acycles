@@ -8,6 +8,7 @@
 
 set(INC
   ..
+  ../../third_party/meshoptimizer/src
 )
 set(INC_SYS
 )
@@ -73,6 +74,7 @@ if(WITH_CYCLES_STANDALONE)
     cycles_standalone.cpp
     a3d_scene_reader.cpp
     a3d_scene_reader.h
+    ../../third_party/meshoptimizer/src/indexcodec.cpp
     cycles_xml.cpp
     cycles_xml.h
     oiio_output_driver.cpp
