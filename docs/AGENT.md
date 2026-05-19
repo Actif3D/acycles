@@ -6,6 +6,46 @@ This repository is a fork of standalone Blender Cycles. The current objective is
 
 This document gives Codex and other coding agents the project context, constraints, implementation priorities, and guardrails required to start work safely.
 
+## Important source-of-truth notice
+
+When implementing Asset3D support in `acycles`, **do not invent or infer Asset3D scene, material, buffer, or job data structures from memory or from incomplete assumptions**.
+
+The authoritative source repositories are expected to exist locally as sibling folders next to the root of this `acycles` repository:
+
+```text
+../a3d-canvas
+../a3d-studio-server
+```
+
+Agents must inspect those sibling repositories directly before implementing or changing:
+
+- Asset3D scene JSON parsing
+- geometry buffer decoding
+- material field mapping
+- texture descriptor handling
+- camera/view/render setting interpretation
+- light definitions
+- lightmap-related scene data
+- Studio render/bake job expectations
+- SparkTrace compatibility behavior that the Studio server currently depends on
+
+Repository roles:
+
+- `../a3d-canvas`
+  - runtime Asset3D scene/data specification
+  - scene loading expectations
+  - material/runtime semantics
+  - deferred-object conventions
+  - `docs/A3D_SCENE_DATA_SPECIFICATION.md` where applicable
+- `../a3d-studio-server`
+  - offline scene-folder layout
+  - SparkTrace integration contract
+  - render/bake/post-process job parameters
+  - geometry packing and lightmap workflow expectations
+  - server-side interpretation of `scene.json`, `render.json`, and generated files
+
+Before coding, search these sibling repos for the exact field names, file paths, and binary buffer layouts needed by the task. If a required contract is unclear, document the uncertainty and trace it back to the sibling source code rather than guessing.
+
 ## Current repository state
 
 The current fork still largely follows standalone Cycles structure:
@@ -123,6 +163,8 @@ Do not treat `scene.json` as the entire scene. Asset3D scenes are folder-based p
 
 The renderer must be designed around the scene package, not a single JSON file.
 
+When the Asset3D scene package layout, file naming, or binary buffer structure is needed, inspect `../a3d-studio-server` and `../a3d-canvas` first.
+
 ## Material mapping scope for the first slice
 
 Support a conservative subset first:
@@ -135,7 +177,7 @@ Support a conservative subset first:
 - opacity/cutout where straightforward
 - emissive color/intensity where already well-defined
 
-Do not implement every legacy House3D/A3D material branch in the first pass. Use the dedicated material mapping specification as the source of truth.
+Do not implement every legacy House3D/A3D material branch in the first pass. Use the dedicated material mapping specification as the source of truth, and verify source field semantics against `../a3d-canvas` and `../a3d-studio-server` before coding.
 
 ## Device and build constraints
 
@@ -153,7 +195,7 @@ Do not add hard dependencies that break the existing standalone build unexpected
 
 The existing standalone renderer already has progress callbacks. For Asset3D Studio integration, prefer explicit, parseable status lines rather than human-only carriage-return progress.
 
-Progress messages should be documented before implementation and should remain stable once Studio consumes them.
+Progress messages should be documented before implementation and should remain stable once Studio consumes them. Inspect `../a3d-studio-server` subprocess/progress handling before finalizing any output contract.
 
 ## Coding guardrails
 
@@ -164,6 +206,8 @@ Progress messages should be documented before implementation and should remain s
 - Avoid one-off scene-specific heuristics.
 - Add targeted tests or sample fixtures when practical.
 - Write docs first when introducing external contracts.
+- Use `../a3d-canvas` and `../a3d-studio-server` as the local source of truth for Asset3D data contracts.
+- Do not guess field names, binary layouts, scene-package paths, or server job semantics.
 
 ## Documents Codex should read before coding
 
@@ -175,6 +219,8 @@ Progress messages should be documented before implementation and should remain s
 6. `docs/A3D_STUDIO_INTEGRATION_PLAN.md`
 7. `docs/ACYLES_TASKS.md`
 8. `docs/CODING_GUIDELINES.md`
+9. Relevant source files in `../a3d-canvas`
+10. Relevant source files in `../a3d-studio-server`
 
 ## Definition of done for the first slice
 
@@ -187,3 +233,4 @@ The first slice is complete when:
 - XML scene rendering still works.
 - The new reader code is modular and documented.
 - The relevant docs remain accurate.
+- Asset3D field semantics used by the implementation have been verified against the sibling repositories rather than guessed.
