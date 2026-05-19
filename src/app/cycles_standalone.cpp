@@ -4,6 +4,11 @@
 
 #include <cstdio>
 
+#ifdef _WIN32
+#  include <fcntl.h>
+#  include <io.h>
+#endif
+
 #include "device/device.h"
 #include "scene/camera.h"
 #include "scene/integrator.h"
@@ -59,6 +64,15 @@ struct Options {
   float sample_clamp_direct;
   float sample_clamp_indirect;
 } options;
+
+static void configure_status_stdout()
+{
+#ifdef _WIN32
+  if (options.a3d_status_messages) {
+    _setmode(_fileno(stdout), _O_BINARY);
+  }
+#endif
+}
 
 static void session_print(const string &str)
 {
@@ -678,6 +692,8 @@ static void options_parse(const int argc, const char **argv)
     options.a3d_scene_root = options.filepath;
     options.filepath = "";
   }
+
+  configure_status_stdout();
 
   if (options.list_capabilities) {
     const vector<DeviceInfo> devices = Device::available_devices();
