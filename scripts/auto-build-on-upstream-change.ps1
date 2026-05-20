@@ -261,9 +261,15 @@ try {
 
   do {
     try {
-      Write-Log "Fetching $($remoteRef.Remote)"
-      Invoke-RepoGit @("fetch", "--prune", $remoteRef.Remote) | Tee-Object -FilePath $script:LogPath -Append
+      $fetchOutput = Invoke-RepoGit @("fetch", "--prune", $remoteRef.Remote) 2>&1
       if ($LASTEXITCODE -ne 0) {
+        Write-Log "Fetching $($remoteRef.Remote)"
+        if ($fetchOutput) {
+          $fetchOutput | ForEach-Object {
+            Write-Output $_
+            Add-Content -Path $script:LogPath -Value $_ -Encoding utf8
+          }
+        }
         throw "git fetch failed with exit code $LASTEXITCODE"
       }
 
@@ -276,6 +282,12 @@ try {
 
       if ($headSha -eq $upstreamSha) {
         if ($lastSuccessfulBuildSha -ne $headSha) {
+          if ($fetchOutput) {
+            $fetchOutput | ForEach-Object {
+              Write-Output $_
+              Add-Content -Path $script:LogPath -Value $_ -Encoding utf8
+            }
+          }
           Write-Log "No upstream change, but HEAD $headSha has not built successfully yet."
           Invoke-ConfigureAndBuild `
             -OldRevision $lastSuccessfulBuildSha `
@@ -283,11 +295,14 @@ try {
             -ResolvedOptixRoot $resolvedOptixRoot `
             -ResolvedOidnRoot $resolvedOidnRoot
         }
-        else {
-          Write-Log "No upstream change. HEAD is $headSha"
-        }
       }
       else {
+        if ($fetchOutput) {
+          $fetchOutput | ForEach-Object {
+            Write-Output $_
+            Add-Content -Path $script:LogPath -Value $_ -Encoding utf8
+          }
+        }
         Write-Log "Upstream changed: HEAD=$headSha $UpstreamRef=$upstreamSha"
 
         if (-not (Test-WorkingTreeClean)) {
