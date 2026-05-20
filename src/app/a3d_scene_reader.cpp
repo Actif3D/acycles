@@ -884,11 +884,11 @@ Transform look_transform(const float3 position,
   if (fabsf(dot(up, forward)) > 0.999f) {
     up = make_float3(0.0f, 1.0f, 0.0f);
   }
-  float3 right = normalize(cross(up, forward));
-  up = normalize(cross(forward, right));
+  float3 right = normalize(cross(forward, up));
+  up = normalize(cross(right, forward));
   if (roll != 0.0f) {
     right = normalize(right * cosf(roll) + up * sinf(roll));
-    up = normalize(cross(forward, right));
+    up = normalize(cross(right, forward));
   }
 
   return make_transform(right.x,
