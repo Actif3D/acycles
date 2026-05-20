@@ -46,7 +46,7 @@
 
 ### Integration
 
-- [ ] Test with Asset3D Studio preview pipeline
+- [x] Test with Asset3D Studio preview pipeline
 - [x] Verify render path compatibility
 - [x] Verify subprocess progress parsing
 - [x] Studio positional scene-folder invocation verified
@@ -55,11 +55,11 @@
 
 # Milestone 2 — Material Stability
 
-- [ ] Roughness normalization
-- [ ] Glossiness conversion
-- [ ] Emissive normalization
-- [ ] Normal-map validation
-- [ ] Texture color-space validation
+- [x] Roughness normalization
+- [x] Glossiness conversion
+- [x] Emissive normalization
+- [x] Normal-map validation
+- [x] Texture color-space validation
 - [ ] Double-sided handling
 
 ---

@@ -342,6 +342,62 @@ float3 json_float3(const Json &value, const float3 fallback)
                      json_float(value.array_value[2], fallback.z));
 }
 
+float clamp_float(const float value, const float minimum, const float maximum)
+{
+  if (!std::isfinite(value)) {
+    return minimum;
+  }
+  return clamp(value, minimum, maximum);
+}
+
+float3 clamp_color(const float3 color, const float maximum)
+{
+  return make_float3(clamp_float(color.x, 0.0f, maximum),
+                     clamp_float(color.y, 0.0f, maximum),
+                     clamp_float(color.z, 0.0f, maximum));
+}
+
+float material_roughness(const Json &mat)
+{
+  float roughness = json_float(mat.get("roughness"), -1.0f);
+  if (roughness < 0.0f) {
+    const float glossiness = json_float(mat.get("glossiness"),
+                                        json_float(mat.get("reflectionGlossiness"),
+                                                   json_float(mat.get("legacyGlossiness"), -1.0f)));
+    if (glossiness >= 0.0f) {
+      roughness = 1.0f - glossiness;
+    }
+  }
+  if (roughness < 0.0f) {
+    roughness = 0.5f;
+  }
+  return clamp_float(roughness, 0.04f, 1.0f);
+}
+
+float material_emission_strength(const Json &mat)
+{
+  float strength = json_float(mat.get("emissionStrength"),
+                              json_bool(mat.get("emissive"), false) ? 1.0f : 0.0f);
+  strength = max(strength, json_float(mat.get("selfIllumination"), 0.0f));
+  if (json_bool(mat.get("unlit"), false)) {
+    strength = max(strength, 1.0f);
+  }
+  return clamp_float(strength, 0.0f, 10.0f);
+}
+
+float3 material_emission_color(const Json &mat, const float3 base_color)
+{
+  if (mat.get("emissive").is_array()) {
+    return clamp_color(json_float3(mat.get("emissive"), base_color), 1.0f);
+  }
+  if (json_bool(mat.get("emissive"), false) || json_bool(mat.get("unlit"), false) ||
+      json_float(mat.get("selfIllumination"), 0.0f) > 0.0f)
+  {
+    return base_color;
+  }
+  return make_float3(0.0f, 0.0f, 0.0f);
+}
+
 bool read_text(const string &path, string &text, string *error)
 {
   if (!path_read_text(path, text)) {
@@ -812,12 +868,14 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
 
   auto graph = make_unique<ShaderGraph>();
   PrincipledBsdfNode *principled = graph->create_node<PrincipledBsdfNode>();
-  principled->set_base_color(json_float3(mat.get("baseColor"), make_float3(0.8f, 0.8f, 0.8f)));
-  principled->set_roughness(json_float(mat.get("roughness"), 0.5f));
-  principled->set_metallic(json_float(mat.get("metallic"), 0.0f));
-  principled->set_alpha(json_float(mat.get("opacity"), 1.0f));
-  principled->set_emission_color(json_float3(mat.get("emissive"), make_float3(0.0f, 0.0f, 0.0f)));
-  principled->set_emission_strength(json_float(mat.get("emissionStrength"), 0.0f));
+  const float3 base_color = clamp_color(
+      json_float3(mat.get("baseColor"), make_float3(0.8f, 0.8f, 0.8f)), 0.8f);
+  principled->set_base_color(base_color);
+  principled->set_roughness(material_roughness(mat));
+  principled->set_metallic(clamp_float(json_float(mat.get("metallic"), 0.0f), 0.0f, 1.0f));
+  principled->set_alpha(clamp_float(json_float(mat.get("opacity"), 1.0f), 0.0f, 1.0f));
+  principled->set_emission_color(material_emission_color(mat, base_color));
+  principled->set_emission_strength(material_emission_strength(mat));
 
   const string base_color_path = resolve_texture_path(root, mat.get("baseColorTexture"));
   if (!base_color_path.empty()) {
@@ -852,7 +910,7 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
     image->set_filename(ustring(normal_path));
     image->set_colorspace(u_colorspace_data);
     NormalMapNode *normal = graph->create_node<NormalMapNode>();
-    normal->set_strength(json_float(mat.get("normalScale"), 1.0f));
+    normal->set_strength(clamp_float(json_float(mat.get("normalScale"), 1.0f), 0.0f, 4.0f));
     graph->connect(image->output("Color"), normal->input("Color"));
     graph->connect(normal->output("Normal"), principled->input("Normal"));
   }
