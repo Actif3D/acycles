@@ -48,9 +48,13 @@ function Import-VcVars64 {
   $env:WindowsSdkDir = $sdkRoot + "\"
   $env:WindowsSDKVersion = $sdkVersion.Name + "\"
 
-  Add-PathEntry (Join-Path $msvcTools.FullName "bin\Hostx64\x64")
-  Add-PathEntry (Join-Path $sdkBinRoot (Join-Path $sdkVersion.Name "x64"))
-  Add-PathEntry (Join-Path $sdkBinRoot "x64")
+  $script:MsvcBin = Join-Path $msvcTools.FullName "bin\Hostx64\x64"
+  $script:WindowsSdkVersionedBin = Join-Path $sdkBinRoot (Join-Path $sdkVersion.Name "x64")
+  $script:WindowsSdkBin = Join-Path $sdkBinRoot "x64"
+
+  Add-PathEntry $script:MsvcBin
+  Add-PathEntry $script:WindowsSdkVersionedBin
+  Add-PathEntry $script:WindowsSdkBin
 
   Add-EnvEntries "INCLUDE" @(
     (Join-Path $msvcTools.FullName "include"),
@@ -149,6 +153,30 @@ function Add-CMakeCompilerPath {
   }
 }
 
+function Set-ShortBuildPath {
+  param([string[]]$ExtraEntries)
+
+  $toolEntries = @(
+    $script:MsvcBin,
+    $script:WindowsSdkVersionedBin,
+    $script:WindowsSdkBin,
+    "$env:SystemRoot\System32",
+    $env:SystemRoot,
+    (Join-Path $env:SystemRoot "System32\Wbem"),
+    (Split-Path -Parent (Get-Command cmake -ErrorAction SilentlyContinue).Source),
+    (Split-Path -Parent (Get-Command ninja -ErrorAction SilentlyContinue).Source)
+  ) + $ExtraEntries
+
+  $pathEntries = @()
+  foreach ($entry in $toolEntries) {
+    if ($entry -and (Test-Path $entry) -and ($pathEntries -notcontains $entry)) {
+      $pathEntries += $entry
+    }
+  }
+
+  $env:PATH = $pathEntries -join [System.IO.Path]::PathSeparator
+}
+
 Import-VcVars64
 
 $buildNinja = Join-Path $BuildDir "build.ninja"
@@ -181,6 +209,9 @@ else {
     }
   }
 }
+
+$cudaBin = if ($env:CUDA_PATH) { Join-Path $env:CUDA_PATH "bin" } else { $null }
+Set-ShortBuildPath @($vcpkgBin, (Join-Path $resolvedOidnRoot "bin"), $cudaBin)
 
 cmake --build $BuildDir --target $Target --config $Config
 if ($LASTEXITCODE -ne 0) {

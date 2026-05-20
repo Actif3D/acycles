@@ -150,27 +150,28 @@ function Invoke-LoggedScript {
   }
 
   $processArgs = @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath) + $Arguments
-  $process = Start-Process `
-    -FilePath "powershell" `
-    -ArgumentList $processArgs `
-    -WorkingDirectory $RepositoryRoot `
-    -RedirectStandardOutput $stdoutPath `
-    -RedirectStandardError $stderrPath `
-    -NoNewWindow `
-    -Wait `
-    -PassThru
 
-  foreach ($outputPath in @($stdoutPath, $stderrPath)) {
-    if (Test-Path $outputPath) {
-      Get-Content $outputPath | ForEach-Object {
-        Write-Output $_
-        Add-Content -Path $script:LogPath -Value $_ -Encoding utf8
-      }
-    }
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & powershell @processArgs *>&1
+    $exitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
   }
 
-  if ($process.ExitCode -ne 0) {
-    throw "$Step failed with exit code $($process.ExitCode)"
+  if ($output) {
+    $output | Set-Content -Path $stdoutPath -Encoding utf8
+    foreach ($line in $output) {
+      Write-Output $line
+      Add-Content -Path $script:LogPath -Value $line -Encoding utf8
+    }
+  }
+  New-Item -ItemType File -Path $stderrPath -Force | Out-Null
+
+  if ($exitCode -ne 0) {
+    throw "$Step failed with exit code $exitCode"
   }
   Write-Log "Finished $Step"
 }
