@@ -75,6 +75,40 @@ function Test-WorkingTreeClean {
   return -not $status
 }
 
+function Get-ChangedFiles {
+  param(
+    [string]$OldRevision,
+    [string]$NewRevision
+  )
+
+  $files = Invoke-RepoGit @("diff", "--name-only", "$OldRevision..$NewRevision")
+  if ($LASTEXITCODE -ne 0) {
+    throw "git diff --name-only failed with exit code $LASTEXITCODE"
+  }
+  return @($files)
+}
+
+function Test-ConfigureRelatedChange {
+  param([string[]]$Files)
+
+  foreach ($file in $Files) {
+    $normalized = $file.Replace("\", "/")
+    if ($normalized -eq "CMakeLists.txt" -or
+        $normalized -eq "vcpkg.json" -or
+        $normalized -eq "vcpkg-configuration.json" -or
+        $normalized -like "*.cmake" -or
+        $normalized -like "*/CMakeLists.txt" -or
+        $normalized -like "src/cmake/*" -or
+        $normalized -like "scripts/configure-*.ps1" -or
+        $normalized -like "scripts/configure-*.sh" -or
+        $normalized -eq "scripts/build-local.ps1") {
+      return $true
+    }
+  }
+
+  return $false
+}
+
 function Invoke-LoggedScript {
   param(
     [string]$ScriptPath,
@@ -147,16 +181,32 @@ try {
           Write-Log "Working tree is dirty; skipping pull and build."
         }
         else {
+          $changedFiles = Get-ChangedFiles -OldRevision $headSha -NewRevision $upstreamSha
+          $changedFileCount = @($changedFiles).Count
+          Write-Log "Upstream file changes: $changedFileCount"
+
           Invoke-RepoGit @("pull", "--ff-only", $remoteRef.Remote, $remoteRef.Branch) |
             Tee-Object -FilePath $script:LogPath -Append
           if ($LASTEXITCODE -ne 0) {
             throw "git pull --ff-only failed with exit code $LASTEXITCODE"
           }
 
-          Invoke-LoggedScript `
-            -ScriptPath (Join-Path $RepositoryRoot "scripts\configure-local-cuda-optix.ps1") `
-            -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $resolvedOptixRoot) `
-            -Step "configure"
+          $cachePath = Join-Path (Join-Path $RepositoryRoot $BuildDir) "CMakeCache.txt"
+          $needsConfigure = -not (Test-Path $cachePath)
+          if (-not $needsConfigure) {
+            $needsConfigure = Test-ConfigureRelatedChange -Files $changedFiles
+          }
+
+          if ($needsConfigure) {
+            Write-Log "Configure required."
+            Invoke-LoggedScript `
+              -ScriptPath (Join-Path $RepositoryRoot "scripts\configure-local-cuda-optix.ps1") `
+              -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $resolvedOptixRoot) `
+              -Step "configure"
+          }
+          else {
+            Write-Log "No configure-related changes detected; reusing existing $BuildDir."
+          }
 
           Invoke-LoggedScript `
             -ScriptPath (Join-Path $RepositoryRoot "scripts\build-local.ps1") `
