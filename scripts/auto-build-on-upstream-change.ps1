@@ -4,6 +4,7 @@ param(
   [int]$PollSeconds = 300,
   [string]$BuildDir = "build",
   [string]$OptixRoot = $env:OPTIX_ROOT_DIR,
+  [string]$OidnRoot = $env:OPENIMAGEDENOISE_ROOT_DIR,
   [switch]$Once
 )
 
@@ -51,6 +52,27 @@ function Get-OptixRoot {
   }
 
   return $null
+}
+
+function Get-OidnRoot {
+  if ($OidnRoot -and (Test-Path (Join-Path $OidnRoot "include\OpenImageDenoise\oidn.h"))) {
+    return $OidnRoot
+  }
+
+  $oidnCandidates = @(
+    "F:\Tmp\oidn-2.4.1.x64.windows",
+    "F:\Tmp\oidn-2.3.3.x64.windows",
+    "$env:ProgramFiles\Intel\Open Image Denoise",
+    "$env:ProgramFiles\Intel\oneAPI\oidn\latest"
+  )
+
+  $oidnCandidates += Get-ChildItem "F:\Tmp" -Directory -Filter "oidn-*.x64.windows" -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
+    Select-Object -ExpandProperty FullName
+
+  return $oidnCandidates |
+    Where-Object { $_ -and (Test-Path (Join-Path $_ "include\OpenImageDenoise\oidn.h")) } |
+    Select-Object -First 1
 }
 
 function Split-RemoteRef {
@@ -158,6 +180,7 @@ function Invoke-ConfigureAndBuild {
     [string]$OldRevision,
     [string]$NewRevision,
     [string]$ResolvedOptixRoot,
+    [string]$ResolvedOidnRoot,
     [switch]$ForceBuildOnly
   )
 
@@ -177,7 +200,7 @@ function Invoke-ConfigureAndBuild {
     Write-Log "Configure required."
     Invoke-LoggedScript `
       -ScriptPath (Join-Path $RepositoryRoot "scripts\configure-local-cuda-optix.ps1") `
-      -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $ResolvedOptixRoot) `
+      -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $ResolvedOptixRoot, "-OidnRoot", $ResolvedOidnRoot) `
       -Step "configure"
   }
   else {
@@ -186,7 +209,7 @@ function Invoke-ConfigureAndBuild {
 
   Invoke-LoggedScript `
     -ScriptPath (Join-Path $RepositoryRoot "scripts\build-local.ps1") `
-    -Arguments @("-BuildDir", $BuildDir, "-Target", "install", "-Config", "Release") `
+    -Arguments @("-BuildDir", $BuildDir, "-Target", "install", "-Config", "Release", "-OidnRoot", $ResolvedOidnRoot) `
     -Step "build"
 
   Set-Content -Path $script:LastSuccessfulBuildPath -Value $NewRevision -Encoding ascii
@@ -226,9 +249,14 @@ try {
   if (-not $resolvedOptixRoot) {
     throw "Could not find OptiX SDK. Pass -OptixRoot pointing to a directory containing include\optix.h."
   }
+  $resolvedOidnRoot = Get-OidnRoot
+  if (-not $resolvedOidnRoot) {
+    throw "Could not find OpenImageDenoise. Pass -OidnRoot pointing to a directory containing include\OpenImageDenoise\oidn.h."
+  }
 
   Write-Log "Watching $UpstreamRef every $PollSeconds seconds in $RepositoryRoot"
   Write-Log "Using OptiX root: $resolvedOptixRoot"
+  Write-Log "Using OpenImageDenoise root: $resolvedOidnRoot"
 
   do {
     try {
@@ -251,7 +279,8 @@ try {
           Invoke-ConfigureAndBuild `
             -OldRevision $lastSuccessfulBuildSha `
             -NewRevision $headSha `
-            -ResolvedOptixRoot $resolvedOptixRoot
+            -ResolvedOptixRoot $resolvedOptixRoot `
+            -ResolvedOidnRoot $resolvedOidnRoot
         }
         else {
           Write-Log "No upstream change. HEAD is $headSha"
@@ -278,7 +307,8 @@ try {
           Invoke-ConfigureAndBuild `
             -OldRevision $headSha `
             -NewRevision $newHeadSha `
-            -ResolvedOptixRoot $resolvedOptixRoot
+            -ResolvedOptixRoot $resolvedOptixRoot `
+            -ResolvedOidnRoot $resolvedOidnRoot
         }
       }
     }

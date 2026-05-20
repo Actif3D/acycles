@@ -1,6 +1,7 @@
 param(
   [string]$BuildDir = "build",
   [string]$OptixRoot = $env:OPTIX_ROOT_DIR,
+  [string]$OidnRoot = $env:OPENIMAGEDENOISE_ROOT_DIR,
   [string]$VcpkgRoot = $env:VCPKG_ROOT
 )
 
@@ -17,24 +18,95 @@ function Add-PathEntry {
   }
 }
 
-function Import-VcVars64 {
-  $vcvarsCandidates = @(
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
-    "$env:ProgramFiles\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
-    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+function Add-EnvEntries {
+  param(
+    [string]$Name,
+    [string[]]$Entries
   )
 
-  $vcvars = $vcvarsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if (-not $vcvars) {
-    throw "Could not find vcvars64.bat. Install Visual Studio Build Tools with the C++ workload."
-  }
-
-  cmd /s /c "`"$vcvars`" >nul && set" | ForEach-Object {
-    if ($_ -match "^(.*?)=(.*)$") {
-      [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+  $separator = [System.IO.Path]::PathSeparator
+  $existing = [System.Environment]::GetEnvironmentVariable($Name, "Process")
+  $values = @()
+  foreach ($entry in $Entries) {
+    if ($entry -and (Test-Path $entry) -and ($values -notcontains $entry)) {
+      $values += $entry
     }
   }
+  if ($existing) {
+    foreach ($entry in ($existing -split $separator)) {
+      if ($entry -and ($values -notcontains $entry)) {
+        $values += $entry
+      }
+    }
+  }
+
+  [System.Environment]::SetEnvironmentVariable($Name, ($values -join $separator), "Process")
+}
+
+function Import-VcVars64 {
+  $msvcRootCandidates = @(
+    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC",
+    "$env:ProgramFiles\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC",
+    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC",
+    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC"
+  )
+
+  $msvcRoot = $msvcRootCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $msvcRoot) {
+    throw "Could not find MSVC tools. Install Visual Studio Build Tools with the C++ workload."
+  }
+
+  $msvcTools = Get-ChildItem $msvcRoot -Directory |
+    Sort-Object Name -Descending |
+    Select-Object -First 1
+  if (-not $msvcTools) {
+    throw "Could not find an installed MSVC toolset under $msvcRoot."
+  }
+
+  $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10"
+  $sdkIncludeRoot = Join-Path $sdkRoot "Include"
+  $sdkLibRoot = Join-Path $sdkRoot "Lib"
+  $sdkBinRoot = Join-Path $sdkRoot "bin"
+  $sdkVersion = Get-ChildItem $sdkIncludeRoot -Directory -ErrorAction SilentlyContinue |
+    Where-Object {
+      (Test-Path (Join-Path $_.FullName "ucrt")) -and
+      (Test-Path (Join-Path $sdkLibRoot (Join-Path $_.Name "ucrt\x64"))) -and
+      (Test-Path (Join-Path $sdkLibRoot (Join-Path $_.Name "um\x64")))
+    } |
+    Sort-Object Name -Descending |
+    Select-Object -First 1
+  if (-not $sdkVersion) {
+    throw "Could not find a Windows 10 SDK with x64 libraries."
+  }
+
+  $env:VCINSTALLDIR = (Resolve-Path (Join-Path $msvcRoot "..\..\")).Path
+  $env:VCToolsInstallDir = $msvcTools.FullName + "\"
+  $env:WindowsSdkDir = $sdkRoot + "\"
+  $env:WindowsSDKVersion = $sdkVersion.Name + "\"
+
+  Add-PathEntry (Join-Path $msvcTools.FullName "bin\Hostx64\x64")
+  Add-PathEntry (Join-Path $sdkBinRoot (Join-Path $sdkVersion.Name "x64"))
+  Add-PathEntry (Join-Path $sdkBinRoot "x64")
+
+  Add-EnvEntries "INCLUDE" @(
+    (Join-Path $msvcTools.FullName "include"),
+    (Join-Path $sdkVersion.FullName "ucrt"),
+    (Join-Path $sdkVersion.FullName "shared"),
+    (Join-Path $sdkVersion.FullName "um"),
+    (Join-Path $sdkVersion.FullName "winrt"),
+    (Join-Path $sdkVersion.FullName "cppwinrt")
+  )
+
+  Add-EnvEntries "LIB" @(
+    (Join-Path $msvcTools.FullName "lib\x64"),
+    (Join-Path $sdkLibRoot (Join-Path $sdkVersion.Name "ucrt\x64")),
+    (Join-Path $sdkLibRoot (Join-Path $sdkVersion.Name "um\x64"))
+  )
+
+  Add-EnvEntries "LIBPATH" @(
+    (Join-Path $msvcTools.FullName "lib\x64"),
+    (Join-Path $sdkLibRoot (Join-Path $sdkVersion.Name "um\x64"))
+  )
 }
 
 function Find-LatestCudaRoot {
@@ -89,6 +161,27 @@ function Find-VcpkgRoot {
     Select-Object -First 1
 }
 
+function Find-OidnRoot {
+  if ($OidnRoot -and (Test-Path (Join-Path $OidnRoot "include\OpenImageDenoise\oidn.h"))) {
+    return $OidnRoot
+  }
+
+  $oidnCandidates = @(
+    "F:\Tmp\oidn-2.4.1.x64.windows",
+    "F:\Tmp\oidn-2.3.3.x64.windows",
+    "$env:ProgramFiles\Intel\Open Image Denoise",
+    "$env:ProgramFiles\Intel\oneAPI\oidn\latest"
+  )
+
+  $oidnCandidates += Get-ChildItem "F:\Tmp" -Directory -Filter "oidn-*.x64.windows" -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
+    Select-Object -ExpandProperty FullName
+
+  return $oidnCandidates |
+    Where-Object { $_ -and (Test-Path (Join-Path $_ "include\OpenImageDenoise\oidn.h")) } |
+    Select-Object -First 1
+}
+
 Import-VcVars64
 
 $cudaRoot = Find-LatestCudaRoot
@@ -119,6 +212,13 @@ elseif (-not $env:OPTIX_ROOT_DIR) {
   Write-Warning "OPTIX_ROOT_DIR is not set. Configure may disable OptiX until the NVIDIA OptiX SDK is installed and -OptixRoot is provided."
 }
 
+$resolvedOidnRoot = Find-OidnRoot
+if (-not $resolvedOidnRoot) {
+  throw "Could not find OpenImageDenoise. Pass -OidnRoot pointing to the SDK root containing include\OpenImageDenoise\oidn.h."
+}
+$env:OPENIMAGEDENOISE_ROOT_DIR = $resolvedOidnRoot
+Add-PathEntry (Join-Path $resolvedOidnRoot "bin")
+
 if (Test-Path $BuildDir) {
   Remove-Item -Recurse -Force $BuildDir
 }
@@ -140,7 +240,7 @@ $cmakeArgs = @(
   "-DWITH_CYCLES_ALEMBIC=OFF",
   "-DWITH_CYCLES_EMBREE=OFF",
   "-DWITH_CYCLES_OPENIMAGEDENOISE=ON",
-  "-DOPENIMAGEDENOISE_ROOT_DIR=$vcpkgInstalled",
+  "-DOPENIMAGEDENOISE_ROOT_DIR=$resolvedOidnRoot",
   "-DWITH_CYCLES_OPENSUBDIV=OFF",
   "-DWITH_CYCLES_OPENVDB=OFF",
   "-DWITH_CYCLES_NANOVDB=OFF",
