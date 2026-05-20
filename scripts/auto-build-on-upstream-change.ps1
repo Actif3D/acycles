@@ -15,7 +15,7 @@ function Write-Log {
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   $line = "[$timestamp] $Message"
   Write-Output $line
-  Add-Content -Path $script:LogPath -Value $line
+  Add-Content -Path $script:LogPath -Value $line -Encoding utf8
 }
 
 function Invoke-RepoGit {
@@ -117,10 +117,37 @@ function Invoke-LoggedScript {
   )
 
   Write-Log "Starting $Step"
-  & powershell -ExecutionPolicy Bypass -File $ScriptPath @Arguments *>&1 |
-    Tee-Object -FilePath $script:LogPath -Append
-  if ($LASTEXITCODE -ne 0) {
-    throw "$Step failed with exit code $LASTEXITCODE"
+
+  $stdoutPath = Join-Path $script:LogDir "$Step.stdout.log"
+  $stderrPath = Join-Path $script:LogDir "$Step.stderr.log"
+  if (Test-Path $stdoutPath) {
+    Remove-Item -LiteralPath $stdoutPath -Force
+  }
+  if (Test-Path $stderrPath) {
+    Remove-Item -LiteralPath $stderrPath -Force
+  }
+
+  $process = Start-Process `
+    -FilePath "powershell" `
+    -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath) + $Arguments `
+    -WorkingDirectory $RepositoryRoot `
+    -RedirectStandardOutput $stdoutPath `
+    -RedirectStandardError $stderrPath `
+    -NoNewWindow `
+    -Wait `
+    -PassThru
+
+  foreach ($outputPath in @($stdoutPath, $stderrPath)) {
+    if (Test-Path $outputPath) {
+      Get-Content $outputPath | ForEach-Object {
+        Write-Output $_
+        Add-Content -Path $script:LogPath -Value $_ -Encoding utf8
+      }
+    }
+  }
+
+  if ($process.ExitCode -ne 0) {
+    throw "$Step failed with exit code $($process.ExitCode)"
   }
   Write-Log "Finished $Step"
 }
@@ -141,6 +168,7 @@ Set-Location $RepositoryRoot
 
 $logDir = Join-Path $RepositoryRoot "tmp\auto-build"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$script:LogDir = $logDir
 $script:LogPath = Join-Path $logDir "auto-build.log"
 
 $lockPath = Join-Path $logDir "auto-build.lock"
