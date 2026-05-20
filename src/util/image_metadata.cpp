@@ -9,6 +9,13 @@
 #include <OpenImageIO/filesystem.h>
 #include <OpenImageIO/typedesc.h>
 
+#ifdef _WIN32
+#  include <windows.h>
+#  include <objidl.h>
+#  include <propidl.h>
+#  include <gdiplus.h>
+#endif
+
 #include "util/color.h"
 #include "util/colorspace.h"
 #include "util/image.h"
@@ -20,6 +27,187 @@
 #include "util/types_image.h"
 
 CCL_NAMESPACE_BEGIN
+
+#ifdef _WIN32
+
+static bool is_jpeg_filepath(OIIO::string_view filepath)
+{
+  const string filepath_string(filepath.data(), filepath.size());
+  const size_t extension_pos = filepath_string.find_last_of('.');
+  if (extension_pos == string::npos) {
+    return false;
+  }
+
+  string extension = filepath_string.substr(extension_pos + 1);
+  OIIO::Strutil::to_lower(extension);
+  return extension == "jpg" || extension == "jpeg";
+}
+
+static bool ensure_gdiplus_started()
+{
+  static const bool started = []() {
+    Gdiplus::GdiplusStartupInput startup_input;
+    ULONG_PTR token = 0;
+    return Gdiplus::GdiplusStartup(&token, &startup_input, nullptr) == Gdiplus::Ok;
+  }();
+  return started;
+}
+
+static std::unique_ptr<Gdiplus::Bitmap> load_gdiplus_jpeg(OIIO::string_view filepath)
+{
+  if (!is_jpeg_filepath(filepath) || !ensure_gdiplus_started()) {
+    return nullptr;
+  }
+
+  const string filepath_string(filepath.data(), filepath.size());
+  std::unique_ptr<Gdiplus::Bitmap> bitmap(
+      new Gdiplus::Bitmap(string_to_wstring(filepath_string).c_str(), FALSE));
+  if (bitmap->GetLastStatus() != Gdiplus::Ok || bitmap->GetWidth() == 0 ||
+      bitmap->GetHeight() == 0)
+  {
+    return nullptr;
+  }
+
+  return bitmap;
+}
+
+static bool load_metadata_gdiplus_jpeg(OIIO::string_view filepath,
+                                       ImageMetaData &metadata,
+                                       ImageSpec *r_spec)
+{
+  const std::unique_ptr<Gdiplus::Bitmap> bitmap = load_gdiplus_jpeg(filepath);
+  if (!bitmap) {
+    return false;
+  }
+
+  metadata.width = bitmap->GetWidth();
+  metadata.height = bitmap->GetHeight();
+  metadata.channels = 4;
+  metadata.type = IMAGE_DATA_TYPE_BYTE4;
+  metadata.colorspace_file_format = "jpeg";
+  metadata.colorspace_file_hint = "sRGB";
+  metadata.is_unassociated_alpha = false;
+  metadata.is_compressible_as_srgb = false;
+  metadata.has_tiles_and_mipmaps = false;
+  metadata.tile_size = 0;
+  metadata.tile_need_conform = true;
+  metadata.average_color = zero_float4();
+
+  if (r_spec) {
+    *r_spec = ImageSpec(metadata.width, metadata.height, metadata.channels, TypeDesc::UINT8);
+    r_spec->attribute("oiio:ColorSpace", "sRGB");
+  }
+
+  LOG_DEBUG << "Image " << OIIO::Filesystem::filename(filepath) << ", " << metadata.width << "x"
+            << metadata.height << ", untiled (GDI+ JPEG fallback)";
+
+  return true;
+}
+
+template<typename StorageType>
+static bool load_pixels_gdiplus_jpeg_typed(Gdiplus::Bitmap &bitmap,
+                                           const ImageMetaData &metadata,
+                                           StorageType *pixels,
+                                           const bool flip_y)
+{
+  Gdiplus::Rect rect(0, 0, bitmap.GetWidth(), bitmap.GetHeight());
+  std::unique_ptr<Gdiplus::Bitmap> rgba_bitmap(
+      bitmap.Clone(rect, PixelFormat32bppARGB));
+  if (!rgba_bitmap || rgba_bitmap->GetLastStatus() != Gdiplus::Ok) {
+    return false;
+  }
+
+  Gdiplus::BitmapData bitmap_data;
+  if (rgba_bitmap->LockBits(&rect,
+                            Gdiplus::ImageLockModeRead,
+                            PixelFormat32bppARGB,
+                            &bitmap_data) != Gdiplus::Ok)
+  {
+    return false;
+  }
+
+  const uchar *src_pixels = static_cast<const uchar *>(bitmap_data.Scan0);
+  const int64_t width = metadata.width;
+  const int64_t height = metadata.height;
+  const int64_t dst_stride = width * 4;
+  const int64_t src_stride = bitmap_data.Stride;
+
+  for (int64_t y = 0; y < height; y++) {
+    const uchar *src = src_pixels +
+                       (src_stride >= 0 ? y * src_stride : (height - 1 - y) * -src_stride);
+    StorageType *dst = pixels + (flip_y ? (height - 1 - y) : y) * dst_stride;
+
+    for (int64_t x = 0; x < width; x++, src += 4, dst += 4) {
+      /* GDI+ exposes 32-bit ARGB as BGRA bytes on little-endian Windows. */
+      dst[0] = util_image_cast_from_float<StorageType>(float(src[2]) / 255.0f);
+      dst[1] = util_image_cast_from_float<StorageType>(float(src[1]) / 255.0f);
+      dst[2] = util_image_cast_from_float<StorageType>(float(src[0]) / 255.0f);
+      dst[3] = util_image_cast_from_float<StorageType>(float(src[3]) / 255.0f);
+    }
+  }
+
+  rgba_bitmap->UnlockBits(&bitmap_data);
+  return true;
+}
+
+static bool load_pixels_gdiplus_jpeg(OIIO::string_view filepath,
+                                     const ImageMetaData &metadata,
+                                     void *pixels,
+                                     const bool flip_y)
+{
+  if (metadata.channels != 4) {
+    return false;
+  }
+
+  const std::unique_ptr<Gdiplus::Bitmap> bitmap = load_gdiplus_jpeg(filepath);
+  if (!bitmap || bitmap->GetWidth() != metadata.width || bitmap->GetHeight() != metadata.height) {
+    return false;
+  }
+
+  switch (metadata.type) {
+    case IMAGE_DATA_TYPE_BYTE4:
+      if (!load_pixels_gdiplus_jpeg_typed(*bitmap, metadata, static_cast<uchar *>(pixels), flip_y))
+      {
+        return false;
+      }
+      break;
+    case IMAGE_DATA_TYPE_USHORT4:
+      if (!load_pixels_gdiplus_jpeg_typed(
+              *bitmap, metadata, static_cast<uint16_t *>(pixels), flip_y))
+      {
+        return false;
+      }
+      break;
+    case IMAGE_DATA_TYPE_HALF4:
+      if (!load_pixels_gdiplus_jpeg_typed(*bitmap, metadata, static_cast<half *>(pixels), flip_y))
+      {
+        return false;
+      }
+      break;
+    case IMAGE_DATA_TYPE_FLOAT4:
+      if (!load_pixels_gdiplus_jpeg_typed(*bitmap, metadata, static_cast<float *>(pixels), flip_y))
+      {
+        return false;
+      }
+      break;
+    case IMAGE_DATA_TYPE_BYTE:
+    case IMAGE_DATA_TYPE_USHORT:
+    case IMAGE_DATA_TYPE_HALF:
+    case IMAGE_DATA_TYPE_FLOAT:
+    case IMAGE_DATA_TYPE_NANOVDB_FLOAT:
+    case IMAGE_DATA_TYPE_NANOVDB_FLOAT3:
+    case IMAGE_DATA_TYPE_NANOVDB_FLOAT4:
+    case IMAGE_DATA_TYPE_NANOVDB_FPN:
+    case IMAGE_DATA_TYPE_NANOVDB_FP16:
+    case IMAGE_DATA_TYPE_NANOVDB_EMPTY:
+    case IMAGE_DATA_NUM_TYPES:
+      return false;
+  }
+
+  return true;
+}
+
+#endif
 
 ImageMetaData::ImageMetaData() = default;
 
@@ -346,6 +534,11 @@ bool ImageMetaData::oiio_load_metadata(OIIO::string_view filepath, OIIO::ImageSp
 
   std::unique_ptr<ImageInput> in(ImageInput::create(filepath));
   if (!in) {
+#ifdef _WIN32
+    if (load_metadata_gdiplus_jpeg(filepath, *this, r_spec)) {
+      return true;
+    }
+#endif
     LOG_ERROR << "Image file " << filepath << " failed to load.";
     return false;
   }
@@ -357,6 +550,11 @@ bool ImageMetaData::oiio_load_metadata(OIIO::string_view filepath, OIIO::ImageSp
   config.attribute("oiio:UnassociatedAlpha", 1);
 
   if (!in->open(filepath, spec, config)) {
+#ifdef _WIN32
+    if (load_metadata_gdiplus_jpeg(filepath, *this, r_spec)) {
+      return true;
+    }
+#endif
     LOG_ERROR << "Image file " << filepath << " failed to open.";
     return false;
   }
@@ -687,7 +885,11 @@ bool ImageMetaData::oiio_load_pixels(OIIO::string_view filepath,
   /* load image from file through OIIO */
   std::unique_ptr<ImageInput> in = ImageInput::create(filepath);
   if (!in) {
+#ifdef _WIN32
+    return load_pixels_gdiplus_jpeg(filepath, *this, pixels, flip_y);
+#else
     return false;
+#endif
   }
 
   ImageSpec spec = ImageSpec();
@@ -699,7 +901,11 @@ bool ImageMetaData::oiio_load_pixels(OIIO::string_view filepath,
   config.attribute("oiio:UnassociatedAlpha", 1);
 
   if (!in->open(filepath, spec, config)) {
+#ifdef _WIN32
+    return load_pixels_gdiplus_jpeg(filepath, *this, pixels, flip_y);
+#else
     return false;
+#endif
   }
 
   if (spec.depth > 1) {

@@ -168,4 +168,8 @@ if(WIN32 AND NOT USD_OVERRIDE_OPENCOLORIO)
   add_definitions(-DOpenColorIO_SKIP_IMPORTS)
 endif()
 
+if(WIN32)
+  list(APPEND LIB PRIVATE gdiplus)
+endif()
+
 cycles_add_library(cycles_util "${LIB}" ${SRC} ${SRC_HEADERS})
