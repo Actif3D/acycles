@@ -313,6 +313,10 @@ static void scene_init()
       options.scene->integrator->set_use_denoise(true);
       options.scene->integrator->set_denoiser_type(DENOISER_OPENIMAGEDENOISE);
       options.scene->integrator->set_denoise_use_gpu(denoise_device.type != DEVICE_CPU);
+      if (options.a3d_status_messages) {
+        printf("info: OIDN denoiser enabled on %s\n", denoise_device.description.c_str());
+        fflush(stdout);
+      }
     }
     else if (options.a3d_status_messages) {
       printf("info: OIDN denoiser requested but unavailable; rendering without denoising\n");
@@ -366,6 +370,10 @@ static void session_init()
 
   /* load scene */
   scene_init();
+
+  options.session->full_buffer_written_cb = [](string_view filename) {
+    options.session->process_full_buffer_from_disk(filename);
+  };
 
   /* add pass for output. */
   Pass *pass = options.scene->create_node<Pass>();
