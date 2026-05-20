@@ -68,38 +68,37 @@ struct Options {
 
 static vector<float> a3d_preview_result;
 
+static bool device_supports_oidn(const DeviceInfo &info)
+{
+  return (info.denoisers & DENOISER_OPENIMAGEDENOISE) != 0;
+}
+
 static bool oidn_supported_by_devices(const vector<DeviceInfo> &devices)
 {
   for (const DeviceInfo &info : devices) {
-    if (info.denoisers & DENOISER_OPENIMAGEDENOISE) {
+    if (device_supports_oidn(info)) {
       return true;
     }
   }
   return false;
 }
 
-static bool find_oidn_denoise_device(DeviceInfo *denoise_device)
+static bool find_oidn_denoise_device(const DeviceInfo &preferred_device, DeviceInfo *denoise_device)
 {
+  if (device_supports_oidn(preferred_device)) {
+    *denoise_device = preferred_device;
+    return true;
+  }
+
   const vector<DeviceInfo> devices = Device::available_devices();
-  bool found = false;
-
   for (const DeviceInfo &info : devices) {
-    if ((info.denoisers & DENOISER_OPENIMAGEDENOISE) == 0) {
-      continue;
-    }
-
-    if (!found) {
-      *denoise_device = info;
-      found = true;
-    }
-
-    if (info.type == DEVICE_CPU) {
+    if (device_supports_oidn(info)) {
       *denoise_device = info;
       return true;
     }
   }
 
-  return found;
+  return false;
 }
 
 static string normalize_device_name_for_cycles(const string &name)
@@ -321,10 +320,10 @@ static void scene_init()
   }
   if (options.use_oidn_denoiser) {
     DeviceInfo denoise_device;
-    if (find_oidn_denoise_device(&denoise_device)) {
+    if (find_oidn_denoise_device(options.session_params.device, &denoise_device)) {
       options.scene->integrator->set_use_denoise(true);
       options.scene->integrator->set_denoiser_type(DENOISER_OPENIMAGEDENOISE);
-      options.scene->integrator->set_denoise_use_gpu(false);
+      options.scene->integrator->set_denoise_use_gpu(denoise_device.type != DEVICE_CPU);
       if (options.a3d_status_messages) {
         printf("info: OIDN denoiser enabled on %s\n", denoise_device.description.c_str());
         fflush(stdout);
@@ -903,7 +902,7 @@ static void options_parse(const int argc, const char **argv)
 
   if (options.use_oidn_denoiser) {
     DeviceInfo denoise_device;
-    if (find_oidn_denoise_device(&denoise_device)) {
+    if (find_oidn_denoise_device(options.session_params.device, &denoise_device)) {
       options.session_params.denoise_device = denoise_device;
     }
   }
