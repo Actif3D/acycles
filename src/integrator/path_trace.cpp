@@ -582,10 +582,17 @@ void PathTrace::set_denoiser_params(const DenoiseParams &params)
         effective_denoise_device, cpu_fallback_device, effective_denoise_params, interop_device);
 
     if (denoiser_) {
+      LOG_INFO << "Denoiser created: " << denoiser_->get_denoiser_device()->info.description;
       /* Only take into account the "immediate" cancel to have interactive rendering responding to
        * navigation as quickly as possible, but allow to run denoiser after user hit Escape key
        * while doing offline rendering. */
       denoiser_->is_cancelled_cb = [this]() { return render_cancel_.is_requested; };
+    }
+    else {
+      LOG_ERROR << "Denoiser creation failed.";
+      if (effective_denoise_device && effective_denoise_device->have_error()) {
+        LOG_ERROR << effective_denoise_device->error_message();
+      }
     }
   }
 
@@ -622,11 +629,15 @@ void PathTrace::denoise(const RenderWork &render_work)
   }
 
   if (!denoiser_) {
-    /* Denoiser was not configured, so nothing to do here. */
+    LOG_ERROR << "Denoising was scheduled but no denoiser is configured.";
     return;
   }
 
   LOG_DEBUG << "Perform denoising work.";
+  progress_set_status("Denoising");
+  if (progress_update_cb) {
+    progress_update_cb();
+  }
 
   const double start_time = time_dt();
 
@@ -658,14 +669,29 @@ void PathTrace::denoise(const RenderWork &render_work)
     buffer_to_denoise = path_trace_works_.front()->get_render_buffers();
   }
 
-  if (denoiser_->denoise_buffer(render_state_.effective_big_tile_params,
-                                render_state_.effective_denoised_big_tile_params,
-                                buffer_to_denoise,
-                                get_num_samples_in_buffer(),
-                                allow_inplace_modification,
-                                device_scene_->data.integrator.pixel_jitter))
-  {
+  const bool denoised = denoiser_->denoise_buffer(render_state_.effective_big_tile_params,
+                                                render_state_.effective_denoised_big_tile_params,
+                                                buffer_to_denoise,
+                                                get_num_samples_in_buffer(),
+                                                allow_inplace_modification,
+                                                device_scene_->data.integrator.pixel_jitter);
+  if (denoised) {
     render_state_.has_denoised_result = true;
+    progress_set_status("Denoising", "Finished");
+    if (progress_update_cb) {
+      progress_update_cb();
+    }
+    LOG_INFO << "Denoising finished.";
+  }
+  else {
+    progress_set_status("Denoising", "Failed");
+    if (progress_update_cb) {
+      progress_update_cb();
+    }
+    LOG_ERROR << "Denoising failed.";
+    if (denoiser_device && denoiser_device->have_error()) {
+      LOG_ERROR << denoiser_device->error_message();
+    }
   }
 
   render_scheduler_.report_denoise_time(render_work, time_dt() - start_time);

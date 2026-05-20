@@ -81,13 +81,25 @@ static bool oidn_supported_by_devices(const vector<DeviceInfo> &devices)
 static bool find_oidn_denoise_device(DeviceInfo *denoise_device)
 {
   const vector<DeviceInfo> devices = Device::available_devices();
+  bool found = false;
+
   for (const DeviceInfo &info : devices) {
-    if (info.denoisers & DENOISER_OPENIMAGEDENOISE) {
+    if ((info.denoisers & DENOISER_OPENIMAGEDENOISE) == 0) {
+      continue;
+    }
+
+    if (!found) {
+      *denoise_device = info;
+      found = true;
+    }
+
+    if (info.type == DEVICE_CPU) {
       *denoise_device = info;
       return true;
     }
   }
-  return false;
+
+  return found;
 }
 
 static string normalize_device_name_for_cycles(const string &name)
@@ -312,7 +324,7 @@ static void scene_init()
     if (find_oidn_denoise_device(&denoise_device)) {
       options.scene->integrator->set_use_denoise(true);
       options.scene->integrator->set_denoiser_type(DENOISER_OPENIMAGEDENOISE);
-      options.scene->integrator->set_denoise_use_gpu(denoise_device.type != DEVICE_CPU);
+      options.scene->integrator->set_denoise_use_gpu(false);
       if (options.a3d_status_messages) {
         printf("info: OIDN denoiser enabled on %s\n", denoise_device.description.c_str());
         fflush(stdout);
