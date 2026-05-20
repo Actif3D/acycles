@@ -1176,7 +1176,10 @@ bool a3d_read_scene(Scene *scene,
                                (mp.material_id >= 0 && mp.material_id < int(shaders.size())) ?
                                    mp.material_id :
                                    0;
-      std::ranges::fill(mesh->get_shader(), shader_index);
+      array<Node *> used_shaders;
+      used_shaders.push_back_slow(shaders[shader_index]);
+      mesh->set_used_shaders(used_shaders);
+      std::ranges::fill(mesh->get_shader(), 0);
       std::ranges::fill(mesh->get_smooth(), has_normals);
 
       if (has_normals && normals.size() == verts.size()) {

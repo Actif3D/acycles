@@ -95,8 +95,7 @@ class A3DPreviewOutputDriver : public OutputDriver {
 
     float *rgb = a3d_preview_result.data() + 3;
     for (int y = 0; y < height; ++y) {
-      const int src_y = height - 1 - y;
-      const float *src = rgba.data() + size_t(src_y) * size_t(width) * 4;
+      const float *src = rgba.data() + size_t(y) * size_t(width) * 4;
       float *dst = rgb + size_t(y) * size_t(width) * 3;
       for (int x = 0; x < width; ++x) {
         dst[x * 3 + 0] = src[x * 4 + 0];
