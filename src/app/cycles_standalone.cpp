@@ -67,6 +67,28 @@ struct Options {
 
 static vector<float> a3d_preview_result;
 
+static string normalize_device_name_for_cycles(const string &name)
+{
+  const string lower = string_to_lower(name);
+
+  if (lower == "cpu" || string_startswith(lower, "cpu_")) {
+    return "CPU";
+  }
+
+  if (lower == "cuda" || string_startswith(lower, "cuda_")) {
+    if (lower.find("_optix") != string::npos) {
+      return "OPTIX";
+    }
+    return "CUDA";
+  }
+
+  if (lower == "optix" || string_startswith(lower, "optix_")) {
+    return "OPTIX";
+  }
+
+  return name;
+}
+
 class A3DPreviewOutputDriver : public OutputDriver {
  public:
   explicit A3DPreviewOutputDriver(unique_ptr<OutputDriver> delegate) : delegate_(std::move(delegate)) {}
@@ -804,7 +826,8 @@ static void options_parse(const int argc, const char **argv)
   }
 
   /* find matching device */
-  const DeviceType device_type = Device::type_from_string(devicename.c_str());
+  const string cycles_devicename = normalize_device_name_for_cycles(devicename);
+  const DeviceType device_type = Device::type_from_string(cycles_devicename.c_str());
   vector<DeviceInfo> devices = Device::available_devices(DEVICE_MASK(device_type));
 
   bool device_available = false;
