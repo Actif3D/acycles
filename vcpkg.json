@@ -8,6 +8,7 @@
     "openimageio",
     "opencolorio",
     "openjpeg",
+    "openimagedenoise",
     "pugixml",
     "tbb",
     "zlib",
