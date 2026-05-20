@@ -1147,6 +1147,8 @@ bool a3d_read_scene(Scene *scene,
     }
 
     vector<uint8_t> faces16_buf, faces32_buf;
+    size_t required_faces16_size = 0, required_faces32_size = 0;
+    size_face_buffers(mesh_props, &required_faces16_size, &required_faces32_size);
     if (mesh_version >= 3) {
       vector<uint8_t> encoded_faces;
       if (!read_buffer(scene_root, "faces.buf", encoded_faces, error)) {
@@ -1156,16 +1158,19 @@ bool a3d_read_scene(Scene *scene,
       if (!decode_meshopt_faces(encoded_faces, mesh_props, faces16_buf, faces32_buf, &decode_error)) {
         const bool has_faces16 = read_optional_buffer(scene_root, "faces16.buf", faces16_buf);
         const bool has_faces32 = read_optional_buffer(scene_root, "faces.buf", faces32_buf);
-        if (!(has_faces16 && has_faces32)) {
+        if ((required_faces16_size > 0 && !has_faces16) ||
+            (required_faces32_size > 0 && !has_faces32))
+        {
           *error = decode_error;
           return false;
         }
       }
     }
     else {
-      if (!read_buffer(scene_root, "faces16.buf", faces16_buf, error) ||
-          !read_buffer(scene_root, "faces.buf", faces32_buf, error))
-      {
+      if (required_faces16_size > 0 && !read_buffer(scene_root, "faces16.buf", faces16_buf, error)) {
+        return false;
+      }
+      if (required_faces32_size > 0 && !read_buffer(scene_root, "faces.buf", faces32_buf, error)) {
         return false;
       }
     }
