@@ -83,6 +83,9 @@ acycles \
 | `--max-diffuse-bounces` | Studio/SparkTrace-compatible diffuse bounce limit |
 | `--max-transparent-bounces` | Studio/SparkTrace-compatible transparent bounce limit |
 | `--denoise` | enable denoising |
+| `--use-oidn-denoiser` | SparkTrace-compatible request for OpenImageDenoise; no-ops with an `info:` line when unavailable |
+| `--disable-post-process-filters` | accepted for SparkTrace preview compatibility; currently no-op |
+| `--flood-dark-limit <value>` | accepted for SparkTrace preview compatibility; currently no-op |
 | `--quiet` | suppress verbose logs |
 
 ---
@@ -132,7 +135,7 @@ The current Studio integration expects the legacy SparkTrace text format:
 
 ```text
 [OIDN support]
-false
+true|false
 [Devices]
 CUDA_0;CUDA;NVIDIA RTX 4090
 CPU;CPU;CPU description

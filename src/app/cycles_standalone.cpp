@@ -63,9 +63,32 @@ struct Options {
   int transparent_max_bounce;
   float sample_clamp_direct;
   float sample_clamp_indirect;
+  bool use_oidn_denoiser;
 } options;
 
 static vector<float> a3d_preview_result;
+
+static bool oidn_supported_by_devices(const vector<DeviceInfo> &devices)
+{
+  for (const DeviceInfo &info : devices) {
+    if (info.denoisers & DENOISER_OPENIMAGEDENOISE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool find_oidn_denoise_device(DeviceInfo *denoise_device)
+{
+  const vector<DeviceInfo> devices = Device::available_devices();
+  for (const DeviceInfo &info : devices) {
+    if (info.denoisers & DENOISER_OPENIMAGEDENOISE) {
+      *denoise_device = info;
+      return true;
+    }
+  }
+  return false;
+}
 
 static string normalize_device_name_for_cycles(const string &name)
 {
@@ -283,6 +306,18 @@ static void scene_init()
   }
   if (options.sample_clamp_indirect >= 0.0f) {
     options.scene->integrator->set_sample_clamp_indirect(options.sample_clamp_indirect);
+  }
+  if (options.use_oidn_denoiser) {
+    DeviceInfo denoise_device;
+    if (find_oidn_denoise_device(&denoise_device)) {
+      options.scene->integrator->set_use_denoise(true);
+      options.scene->integrator->set_denoiser_type(DENOISER_OPENIMAGEDENOISE);
+      options.scene->integrator->set_denoise_use_gpu(denoise_device.type != DEVICE_CPU);
+    }
+    else if (options.a3d_status_messages) {
+      printf("info: OIDN denoiser requested but unavailable; rendering without denoising\n");
+      fflush(stdout);
+    }
   }
 
   /* Camera width/height override? */
@@ -595,6 +630,7 @@ static void options_parse(const int argc, const char **argv)
   options.transparent_max_bounce = -1;
   options.sample_clamp_direct = -1.0f;
   options.sample_clamp_indirect = -1.0f;
+  options.use_oidn_denoiser = false;
 
   /* device names */
   string device_names;
@@ -725,6 +761,14 @@ static void options_parse(const int argc, const char **argv)
   ap.arg("--clamp-indirect-samples %f:VALUE").help("Asset3D indirect sample clamp").action([&](auto argv) {
     parse_float(argv, &options.sample_clamp_indirect);
   });
+  ap.arg("--use-oidn-denoiser", &options.use_oidn_denoiser)
+      .help("SparkTrace-compatible request to use OpenImageDenoise when available");
+  ap.arg("--disable-post-process-filters")
+      .help("Accepted for SparkTrace preview compatibility")
+      .action([](auto) {});
+  ap.arg("--flood-dark-limit %f:VALUE")
+      .help("Accepted for SparkTrace preview compatibility")
+      .action([](auto) {});
   ap.arg("--bg-map %s:PATH").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-gamma %f:GAMMA").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-yaw %f:DEG").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
@@ -766,7 +810,7 @@ static void options_parse(const int argc, const char **argv)
   if (options.list_capabilities) {
     const vector<DeviceInfo> devices = Device::available_devices();
     printf("[OIDN support]\n");
-    printf("false\n");
+    printf("%s\n", oidn_supported_by_devices(devices) ? "true" : "false");
     printf("[Devices]\n");
     for (const DeviceInfo &info : devices) {
       printf("%s;%s;%s%s\n",
@@ -833,7 +877,15 @@ static void options_parse(const int argc, const char **argv)
   bool device_available = false;
   if (!devices.empty()) {
     options.session_params.device = devices.front();
+    options.session_params.denoise_device = options.session_params.device;
     device_available = true;
+  }
+
+  if (options.use_oidn_denoiser) {
+    DeviceInfo denoise_device;
+    if (find_oidn_denoise_device(&denoise_device)) {
+      options.session_params.denoise_device = denoise_device;
+    }
   }
 
   /* handle invalid configurations */
