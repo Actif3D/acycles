@@ -793,6 +793,10 @@ string resolve_texture_path(const string &root, const Json &texture)
   }
   const string raw_ext = json_string(texture.get("rawExt"));
   if (!raw_ext.empty()) {
+    const string raw_texture_path = path_join(path_join(root, "raw/textures"), id + "." + raw_ext);
+    if (path_exists(raw_texture_path)) {
+      return raw_texture_path;
+    }
     const string raw_path = path_join(root, id + "." + raw_ext);
     if (path_exists(raw_path)) {
       return raw_path;
@@ -821,7 +825,9 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
     image->set_filename(ustring(base_color_path));
     image->set_colorspace(u_colorspace_srgb);
     graph->connect(image->output("Color"), principled->input("Base Color"));
-    graph->connect(image->output("Alpha"), principled->input("Alpha"));
+    if (json_bool(mat.get("baseColorTexture").get("alpha"), false)) {
+      graph->connect(image->output("Alpha"), principled->input("Alpha"));
+    }
   }
 
   const string roughness_path = resolve_texture_path(root, mat.get("roughnessTexture"));
