@@ -35,7 +35,7 @@ function(cuda_add_common_flags cuda_version arch in_flags out_flags)
   set(flags ${in_flags})
 
   if(CUDA_HOST_COMPILER)
-    set(flags ${flags} -ccbin="${CUDA_HOST_COMPILER}")
+    set(flags ${flags} -ccbin=${CUDA_HOST_COMPILER})
   endif()
 
   set(flags ${flags}
