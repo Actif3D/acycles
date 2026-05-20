@@ -39,6 +39,11 @@ function Add-PathEntry {
 
 Import-VcVars64
 
+$buildNinja = Join-Path $BuildDir "build.ninja"
+if (-not (Test-Path $buildNinja)) {
+  throw "Build directory $BuildDir is not configured. Run .\scripts\configure-local-cuda-optix.ps1 -OptixRoot <OptiX SDK root> first, then run this build script again."
+}
+
 $vcpkgBin = Join-Path (Join-Path (Get-Location) $BuildDir) "vcpkg_installed\x64-windows\bin"
 Add-PathEntry $vcpkgBin
 
