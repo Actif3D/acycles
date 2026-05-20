@@ -127,9 +127,10 @@ function Invoke-LoggedScript {
     Remove-Item -LiteralPath $stderrPath -Force
   }
 
+  $processArgs = @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath) + $Arguments
   $process = Start-Process `
     -FilePath "powershell" `
-    -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath) + $Arguments `
+    -ArgumentList $processArgs `
     -WorkingDirectory $RepositoryRoot `
     -RedirectStandardOutput $stdoutPath `
     -RedirectStandardError $stderrPath `
@@ -152,6 +153,46 @@ function Invoke-LoggedScript {
   Write-Log "Finished $Step"
 }
 
+function Invoke-ConfigureAndBuild {
+  param(
+    [string]$OldRevision,
+    [string]$NewRevision,
+    [string]$ResolvedOptixRoot,
+    [switch]$ForceBuildOnly
+  )
+
+  $changedFiles = @()
+  if ($OldRevision) {
+    $changedFiles = Get-ChangedFiles -OldRevision $OldRevision -NewRevision $NewRevision
+    Write-Log "File changes since $OldRevision : $(@($changedFiles).Count)"
+  }
+
+  $cachePath = Join-Path (Join-Path $RepositoryRoot $BuildDir) "CMakeCache.txt"
+  $needsConfigure = -not (Test-Path $cachePath)
+  if (-not $needsConfigure -and -not $ForceBuildOnly) {
+    $needsConfigure = Test-ConfigureRelatedChange -Files $changedFiles
+  }
+
+  if ($needsConfigure) {
+    Write-Log "Configure required."
+    Invoke-LoggedScript `
+      -ScriptPath (Join-Path $RepositoryRoot "scripts\configure-local-cuda-optix.ps1") `
+      -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $ResolvedOptixRoot) `
+      -Step "configure"
+  }
+  else {
+    Write-Log "No configure-related changes detected; reusing existing $BuildDir."
+  }
+
+  Invoke-LoggedScript `
+    -ScriptPath (Join-Path $RepositoryRoot "scripts\build-local.ps1") `
+    -Arguments @("-BuildDir", $BuildDir, "-Target", "install", "-Config", "Release") `
+    -Step "build"
+
+  Set-Content -Path $script:LastSuccessfulBuildPath -Value $NewRevision -Encoding ascii
+  Write-Log "Build completed for $NewRevision"
+}
+
 if (-not $RepositoryRoot) {
   if (Test-Path (Join-Path (Get-Location) ".git")) {
     $RepositoryRoot = (Get-Location).Path
@@ -170,6 +211,7 @@ $logDir = Join-Path $RepositoryRoot "tmp\auto-build"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $script:LogDir = $logDir
 $script:LogPath = Join-Path $logDir "auto-build.log"
+$script:LastSuccessfulBuildPath = Join-Path $logDir "last-successful-build.txt"
 
 $lockPath = Join-Path $logDir "auto-build.lock"
 $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
@@ -198,9 +240,22 @@ try {
 
       $headSha = Get-RequiredGitOutput @("rev-parse", "HEAD")
       $upstreamSha = Get-RequiredGitOutput @("rev-parse", $UpstreamRef)
+      $lastSuccessfulBuildSha = ""
+      if (Test-Path $script:LastSuccessfulBuildPath) {
+        $lastSuccessfulBuildSha = (Get-Content $script:LastSuccessfulBuildPath -First 1).Trim()
+      }
 
       if ($headSha -eq $upstreamSha) {
-        Write-Log "No upstream change. HEAD is $headSha"
+        if ($lastSuccessfulBuildSha -ne $headSha) {
+          Write-Log "No upstream change, but HEAD $headSha has not built successfully yet."
+          Invoke-ConfigureAndBuild `
+            -OldRevision $lastSuccessfulBuildSha `
+            -NewRevision $headSha `
+            -ResolvedOptixRoot $resolvedOptixRoot
+        }
+        else {
+          Write-Log "No upstream change. HEAD is $headSha"
+        }
       }
       else {
         Write-Log "Upstream changed: HEAD=$headSha $UpstreamRef=$upstreamSha"
@@ -219,30 +274,11 @@ try {
             throw "git pull --ff-only failed with exit code $LASTEXITCODE"
           }
 
-          $cachePath = Join-Path (Join-Path $RepositoryRoot $BuildDir) "CMakeCache.txt"
-          $needsConfigure = -not (Test-Path $cachePath)
-          if (-not $needsConfigure) {
-            $needsConfigure = Test-ConfigureRelatedChange -Files $changedFiles
-          }
-
-          if ($needsConfigure) {
-            Write-Log "Configure required."
-            Invoke-LoggedScript `
-              -ScriptPath (Join-Path $RepositoryRoot "scripts\configure-local-cuda-optix.ps1") `
-              -Arguments @("-BuildDir", $BuildDir, "-OptixRoot", $resolvedOptixRoot) `
-              -Step "configure"
-          }
-          else {
-            Write-Log "No configure-related changes detected; reusing existing $BuildDir."
-          }
-
-          Invoke-LoggedScript `
-            -ScriptPath (Join-Path $RepositoryRoot "scripts\build-local.ps1") `
-            -Arguments @("-BuildDir", $BuildDir, "-Target", "install", "-Config", "Release") `
-            -Step "build"
-
           $newHeadSha = Get-RequiredGitOutput @("rev-parse", "HEAD")
-          Write-Log "Build completed for $newHeadSha"
+          Invoke-ConfigureAndBuild `
+            -OldRevision $headSha `
+            -NewRevision $newHeadSha `
+            -ResolvedOptixRoot $resolvedOptixRoot
         }
       }
     }
