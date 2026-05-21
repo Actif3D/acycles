@@ -874,8 +874,13 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
   principled->set_roughness(material_roughness(mat));
   principled->set_metallic(clamp_float(json_float(mat.get("metallic"), 0.0f), 0.0f, 1.0f));
   principled->set_alpha(clamp_float(json_float(mat.get("opacity"), 1.0f), 0.0f, 1.0f));
-  principled->set_emission_color(material_emission_color(mat, base_color));
-  principled->set_emission_strength(material_emission_strength(mat));
+  const float3 emission_color = material_emission_color(mat, base_color);
+  const float emission_strength = material_emission_strength(mat);
+  const bool has_visual_emission = emission_strength > 0.0f &&
+                                   (emission_color.x > 0.0f || emission_color.y > 0.0f ||
+                                    emission_color.z > 0.0f);
+  principled->set_emission_color(make_float3(0.0f, 0.0f, 0.0f));
+  principled->set_emission_strength(0.0f);
 
   const string base_color_path = resolve_texture_path(root, mat.get("baseColorTexture"));
   if (!base_color_path.empty()) {
@@ -915,7 +920,20 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
     graph->connect(normal->output("Normal"), principled->input("Normal"));
   }
 
-  graph->connect(principled->output("BSDF"), graph->output()->input("Surface"));
+  if (has_visual_emission) {
+    EmissionNode *emission = graph->create_node<EmissionNode>();
+    emission->set_color(emission_color);
+    emission->set_strength(emission_strength);
+    LightPathNode *light_path = graph->create_node<LightPathNode>();
+    MixClosureNode *mix = graph->create_node<MixClosureNode>();
+    graph->connect(light_path->output("Is Camera Ray"), mix->input("Fac"));
+    graph->connect(principled->output("BSDF"), mix->input("Closure1"));
+    graph->connect(emission->output("Emission"), mix->input("Closure2"));
+    graph->connect(mix->output("Closure"), graph->output()->input("Surface"));
+  }
+  else {
+    graph->connect(principled->output("BSDF"), graph->output()->input("Surface"));
+  }
   shader->set_graph(std::move(graph));
   shader->tag_update(scene);
   return shader;
