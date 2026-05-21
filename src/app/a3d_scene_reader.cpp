@@ -900,13 +900,16 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
   principled->set_roughness(roughness);
   principled->set_metallic(clamp_float(json_float(mat.get("metallic"), 0.0f), 0.0f, 1.0f));
   principled->set_alpha(opacity);
+  if (legacy_water || legacy_glass) {
+    shader->set_use_transparent_shadow(false);
+  }
   if (legacy_water) {
     principled->set_ior(1.333f);
-    principled->set_transmission_weight(0.55f);
+    principled->set_transmission_weight(0.0f);
   }
   else if (legacy_glass) {
     principled->set_ior(1.45f);
-    principled->set_transmission_weight(clamp_float(1.0f - opacity, 0.2f, 0.85f));
+    principled->set_transmission_weight(0.0f);
   }
   const float3 emission_color = material_emission_color(mat, base_color);
   const float emission_strength = material_emission_strength(mat);
