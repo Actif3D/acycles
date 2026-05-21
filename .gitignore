@@ -32,3 +32,4 @@ install*/
 # OSL compiled examples
 examples/osl/*.oso
 tmp/
+!.env.sample

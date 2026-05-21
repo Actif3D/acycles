@@ -35,6 +35,42 @@ function Get-RequiredGitOutput {
   return ($output | Select-Object -First 1)
 }
 
+function Import-DotEnv {
+  param([string]$Path)
+
+  if (-not (Test-Path $Path)) {
+    return @{}
+  }
+
+  $values = @{}
+  foreach ($line in Get-Content $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $separator = $trimmed.IndexOf("=")
+    if ($separator -lt 1) {
+      continue
+    }
+
+    $name = $trimmed.Substring(0, $separator).Trim()
+    $value = $trimmed.Substring($separator + 1).Trim()
+    if ($value.Length -ge 2) {
+      $quote = $value[0]
+      if (($quote -eq '"' -or $quote -eq "'") -and $value[$value.Length - 1] -eq $quote) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+
+    if ($name -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+      $values[$name] = $value
+    }
+  }
+
+  return $values
+}
+
 function Get-OptixRoot {
   if ($OptixRoot -and (Test-Path (Join-Path $OptixRoot "include\optix.h"))) {
     return $OptixRoot
@@ -230,6 +266,12 @@ $RepositoryRoot = (Resolve-Path $RepositoryRoot).Path
 $script:GitSafeDirectory = $RepositoryRoot.Replace("\", "/")
 
 Set-Location $RepositoryRoot
+
+$dotEnvValues = Import-DotEnv (Join-Path $RepositoryRoot ".env")
+if (-not $PSBoundParameters.ContainsKey("OptixRoot") -and $dotEnvValues.ContainsKey("OPTIX_ROOT_DIR")) {
+  $OptixRoot = $dotEnvValues["OPTIX_ROOT_DIR"]
+  $env:OPTIX_ROOT_DIR = $OptixRoot
+}
 
 $logDir = Join-Path $RepositoryRoot "tmp\auto-build"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null

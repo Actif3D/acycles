@@ -43,6 +43,42 @@ function Add-EnvEntries {
   [System.Environment]::SetEnvironmentVariable($Name, ($values -join $separator), "Process")
 }
 
+function Import-DotEnv {
+  param([string]$Path)
+
+  if (-not (Test-Path $Path)) {
+    return @{}
+  }
+
+  $values = @{}
+  foreach ($line in Get-Content $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $separator = $trimmed.IndexOf("=")
+    if ($separator -lt 1) {
+      continue
+    }
+
+    $name = $trimmed.Substring(0, $separator).Trim()
+    $value = $trimmed.Substring($separator + 1).Trim()
+    if ($value.Length -ge 2) {
+      $quote = $value[0]
+      if (($quote -eq '"' -or $quote -eq "'") -and $value[$value.Length - 1] -eq $quote) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+
+    if ($name -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+      $values[$name] = $value
+    }
+  }
+
+  return $values
+}
+
 function Import-VcVars64 {
   $msvcRootCandidates = @(
     "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC",
@@ -180,6 +216,17 @@ function Find-OidnRoot {
   return $oidnCandidates |
     Where-Object { $_ -and (Test-Path (Join-Path $_ "include\OpenImageDenoise\oidn.h")) } |
     Select-Object -First 1
+}
+
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$dotEnvValues = Import-DotEnv (Join-Path $repositoryRoot ".env")
+if (-not $PSBoundParameters.ContainsKey("OptixRoot") -and $dotEnvValues.ContainsKey("OPTIX_ROOT_DIR")) {
+  $OptixRoot = $dotEnvValues["OPTIX_ROOT_DIR"]
+  $env:OPTIX_ROOT_DIR = $OptixRoot
+}
+if (-not $PSBoundParameters.ContainsKey("OidnRoot") -and $dotEnvValues.ContainsKey("OPENIMAGEDENOISE_ROOT_DIR")) {
+  $OidnRoot = $dotEnvValues["OPENIMAGEDENOISE_ROOT_DIR"]
+  $env:OPENIMAGEDENOISE_ROOT_DIR = $OidnRoot
 }
 
 Import-VcVars64
