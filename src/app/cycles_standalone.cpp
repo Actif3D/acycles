@@ -64,9 +64,41 @@ struct Options {
   float sample_clamp_direct;
   float sample_clamp_indirect;
   bool use_oidn_denoiser;
+  float flood_dark_limit;
 } options;
 
 static vector<float> a3d_preview_result;
+
+static void apply_flood_dark_limit(vector<float> &rgba, const int width, const int height)
+{
+  if (options.flood_dark_limit <= 0.0f) {
+    return;
+  }
+
+  const float limit = options.flood_dark_limit;
+  for (int y = 0; y < height; ++y) {
+    float *row = rgba.data() + size_t(y) * size_t(width) * 4;
+    for (int x = 0; x < width; ++x) {
+      float *pixel = row + x * 4;
+      const float luminance = 0.2126f * pixel[0] + 0.7152f * pixel[1] + 0.0722f * pixel[2];
+      if (luminance >= limit) {
+        continue;
+      }
+
+      if (luminance > 1e-6f) {
+        const float scale = limit / luminance;
+        pixel[0] *= scale;
+        pixel[1] *= scale;
+        pixel[2] *= scale;
+      }
+      else {
+        pixel[0] = limit;
+        pixel[1] = limit;
+        pixel[2] = limit;
+      }
+    }
+  }
+}
 
 static bool device_supports_oidn(const DeviceInfo &info)
 {
@@ -144,6 +176,7 @@ class A3DPreviewOutputDriver : public OutputDriver {
       fprintf(stderr, "Failed to read preview render pass pixels\n");
       return;
     }
+    apply_flood_dark_limit(rgba, width, height);
 
     a3d_preview_result.assign(size_t(3) + size_t(width) * size_t(height) * 3, 0.0f);
     a3d_preview_result[1] = float(width);
@@ -363,7 +396,7 @@ static void session_init()
 
   if (!options.output_filepath.empty()) {
     unique_ptr<OutputDriver> output_driver = make_unique<OIIOOutputDriver>(
-        options.output_filepath, options.output_pass, session_print);
+        options.output_filepath, options.output_pass, session_print, apply_flood_dark_limit);
     if (options.a3d_status_messages) {
       output_driver = make_unique<A3DPreviewOutputDriver>(std::move(output_driver));
     }
@@ -650,6 +683,7 @@ static void options_parse(const int argc, const char **argv)
   options.sample_clamp_direct = -1.0f;
   options.sample_clamp_indirect = -1.0f;
   options.use_oidn_denoiser = false;
+  options.flood_dark_limit = 0.0f;
 
   /* device names */
   string device_names;
@@ -787,7 +821,7 @@ static void options_parse(const int argc, const char **argv)
       .action([](auto) {});
   ap.arg("--flood-dark-limit %f:VALUE")
       .help("Accepted for SparkTrace preview compatibility")
-      .action([](auto) {});
+      .action([&](auto argv) { parse_float(argv, &options.flood_dark_limit); });
   ap.arg("--bg-map %s:PATH").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-gamma %f:GAMMA").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-yaw %f:DEG").help("Accepted for Asset3D Studio compatibility").action([](auto) {});

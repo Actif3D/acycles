@@ -15,8 +15,9 @@ CCL_NAMESPACE_BEGIN
 
 OIIOOutputDriver::OIIOOutputDriver(const string_view filepath,
                                    const string_view pass,
-                                   LogFunction log)
-    : filepath_(filepath), pass_(pass), log_(log)
+                                   LogFunction log,
+                                   PixelProcessor pixel_processor)
+    : filepath_(filepath), pass_(pass), log_(log), pixel_processor_(std::move(pixel_processor))
 {
 }
 
@@ -50,6 +51,9 @@ void OIIOOutputDriver::write_render_tile(const Tile &tile)
   if (!tile.get_pass_pixels(pass_, 4, pixels.data())) {
     log_("Failed to read render pass pixels");
     return;
+  }
+  if (pixel_processor_) {
+    pixel_processor_(pixels, width, height);
   }
 
   /* Manipulate offset and stride to convert from bottom-up to top-down convention. */

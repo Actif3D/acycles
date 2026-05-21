@@ -85,7 +85,7 @@ acycles \
 | `--denoise` | enable denoising |
 | `--use-oidn-denoiser` | SparkTrace-compatible request for OpenImageDenoise; no-ops with an `info:` line when unavailable |
 | `--disable-post-process-filters` | accepted for SparkTrace preview compatibility; currently no-op |
-| `--flood-dark-limit <value>` | accepted for SparkTrace preview compatibility; currently no-op |
+| `--flood-dark-limit <value>` | raises output pixels darker than the limit to avoid pure-black preview regions |
 | `--quiet` | suppress verbose logs |
 
 ---
