@@ -879,8 +879,9 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
   const bool has_visual_emission = emission_strength > 0.0f &&
                                    (emission_color.x > 0.0f || emission_color.y > 0.0f ||
                                     emission_color.z > 0.0f);
-  principled->set_emission_color(make_float3(0.0f, 0.0f, 0.0f));
-  principled->set_emission_strength(0.0f);
+  const float gi_emission_strength = emission_strength * 0.35f;
+  principled->set_emission_color(emission_color);
+  principled->set_emission_strength(has_visual_emission ? gi_emission_strength : 0.0f);
 
   const string base_color_path = resolve_texture_path(root, mat.get("baseColorTexture"));
   if (!base_color_path.empty()) {
@@ -923,13 +924,18 @@ Shader *create_material_shader(Scene *scene, const Json &mat, const string &root
   if (has_visual_emission) {
     EmissionNode *emission = graph->create_node<EmissionNode>();
     emission->set_color(emission_color);
-    emission->set_strength(emission_strength);
+    emission->set_strength(emission_strength - gi_emission_strength);
     LightPathNode *light_path = graph->create_node<LightPathNode>();
-    MixClosureNode *mix = graph->create_node<MixClosureNode>();
-    graph->connect(light_path->output("Is Camera Ray"), mix->input("Fac"));
-    graph->connect(principled->output("BSDF"), mix->input("Closure1"));
-    graph->connect(emission->output("Emission"), mix->input("Closure2"));
-    graph->connect(mix->output("Closure"), graph->output()->input("Surface"));
+    MathNode *camera_emission_strength = graph->create_node<MathNode>();
+    camera_emission_strength->set_math_type(NODE_MATH_MULTIPLY);
+    camera_emission_strength->set_value2(emission_strength - gi_emission_strength);
+    graph->connect(light_path->output("Is Camera Ray"), camera_emission_strength->input("Value1"));
+    graph->connect(camera_emission_strength->output("Value"), emission->input("Strength"));
+
+    AddClosureNode *add = graph->create_node<AddClosureNode>();
+    graph->connect(principled->output("BSDF"), add->input("Closure1"));
+    graph->connect(emission->output("Emission"), add->input("Closure2"));
+    graph->connect(add->output("Closure"), graph->output()->input("Surface"));
   }
   else {
     graph->connect(principled->output("BSDF"), graph->output()->input("Surface"));
