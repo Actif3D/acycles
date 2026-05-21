@@ -398,6 +398,21 @@ float3 material_emission_color(const Json &mat, const float3 base_color)
   return make_float3(0.0f, 0.0f, 0.0f);
 }
 
+bool material_name_contains(const string &name, const char *needle)
+{
+  return string_to_lower(name).find(needle) != string::npos;
+}
+
+bool material_is_legacy_water(const string &name)
+{
+  return material_name_contains(name, "water") || material_name_contains(name, "pool");
+}
+
+bool material_is_legacy_glass(const string &name)
+{
+  return material_name_contains(name, "glass") || material_name_contains(name, "translucent");
+}
+
 bool read_text(const string &path, string &text, string *error)
 {
   if (!path_read_text(path, text)) {
@@ -864,16 +879,35 @@ string resolve_texture_path(const string &root, const Json &texture)
 Shader *create_material_shader(Scene *scene, const Json &mat, const string &root, const int index)
 {
   Shader *shader = scene->create_node<Shader>();
-  shader->name = ustring(json_string(mat.get("name"), string_printf("a3d_material_%d", index).c_str()));
+  const string material_name = json_string(mat.get("name"), string_printf("a3d_material_%d", index).c_str());
+  shader->name = ustring(material_name);
 
   auto graph = make_unique<ShaderGraph>();
   PrincipledBsdfNode *principled = graph->create_node<PrincipledBsdfNode>();
   const float3 base_color = clamp_color(
       json_float3(mat.get("baseColor"), make_float3(0.8f, 0.8f, 0.8f)), 0.8f);
+  const float opacity = clamp_float(json_float(mat.get("opacity"), 1.0f), 0.0f, 1.0f);
+  const bool legacy_water = material_is_legacy_water(material_name);
+  const bool legacy_glass = !legacy_water && material_is_legacy_glass(material_name);
+  float roughness = material_roughness(mat);
+  if (legacy_water) {
+    roughness = min(roughness, 0.08f);
+  }
+  else if (legacy_glass) {
+    roughness = min(roughness, 0.04f);
+  }
   principled->set_base_color(base_color);
-  principled->set_roughness(material_roughness(mat));
+  principled->set_roughness(roughness);
   principled->set_metallic(clamp_float(json_float(mat.get("metallic"), 0.0f), 0.0f, 1.0f));
-  principled->set_alpha(clamp_float(json_float(mat.get("opacity"), 1.0f), 0.0f, 1.0f));
+  principled->set_alpha(opacity);
+  if (legacy_water) {
+    principled->set_ior(1.333f);
+    principled->set_transmission_weight(0.55f);
+  }
+  else if (legacy_glass) {
+    principled->set_ior(1.45f);
+    principled->set_transmission_weight(clamp_float(1.0f - opacity, 0.2f, 0.85f));
+  }
   const float3 emission_color = material_emission_color(mat, base_color);
   const float emission_strength = material_emission_strength(mat);
   const bool has_visual_emission = emission_strength > 0.0f &&
@@ -1130,6 +1164,56 @@ void add_lights(Scene *scene, const Json &scene_json)
 }
 
 }  // namespace
+
+bool a3d_read_render_settings(const string &scene_root, A3DRenderSettings *settings, string *error)
+{
+  try {
+    const string render_json_path = path_join(scene_root, "render.json");
+    if (!path_exists(render_json_path)) {
+      return true;
+    }
+
+    string text;
+    if (!read_text(render_json_path, text, error)) {
+      return false;
+    }
+
+    const Json render_json = JsonParser(text).parse();
+
+    const bool use_bg = json_bool(render_json.get("useBg"), true);
+    if (use_bg && render_json.get("bgColor").is_array()) {
+      settings->scene_options.bg_color = clamp_color(
+          json_float3(render_json.get("bgColor"), settings->scene_options.bg_color), 1.0f);
+      settings->scene_options.has_bg_color = true;
+    }
+    if (use_bg && render_json.get("bgStrength").is_number()) {
+      settings->scene_options.bg_strength = max(json_float(render_json.get("bgStrength"), 1.0f), 0.0f);
+      settings->scene_options.has_bg_strength = true;
+    }
+    else if (!use_bg) {
+      settings->scene_options.bg_strength = 0.0f;
+      settings->scene_options.has_bg_strength = true;
+    }
+
+    if (render_json.get("floodDarkLimit").is_number()) {
+      settings->flood_dark_limit = max(json_float(render_json.get("floodDarkLimit"), 0.0f), 0.0f);
+      settings->has_flood_dark_limit = true;
+    }
+    if (render_json.get("useOidnDenoiser").is_bool()) {
+      settings->use_oidn_denoiser = json_bool(render_json.get("useOidnDenoiser"), false);
+      settings->has_use_oidn_denoiser = true;
+    }
+    if (render_json.get("usePostProcessFilters").is_bool()) {
+      settings->use_post_process_filters = json_bool(render_json.get("usePostProcessFilters"), true);
+      settings->has_use_post_process_filters = true;
+    }
+    return true;
+  }
+  catch (const std::exception &ex) {
+    *error = string("Failed to read Asset3D render settings: ") + ex.what();
+    return false;
+  }
+}
 
 bool a3d_read_scene(Scene *scene,
                     const string &scene_root,

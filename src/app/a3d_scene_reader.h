@@ -30,6 +30,21 @@ struct A3DSceneReaderOptions {
   float3 bg_color = make_float3(0.05f, 0.05f, 0.05f);
 };
 
+struct A3DRenderSettings {
+  A3DSceneReaderOptions scene_options;
+
+  bool has_flood_dark_limit = false;
+  float flood_dark_limit = 0.0f;
+
+  bool has_use_oidn_denoiser = false;
+  bool use_oidn_denoiser = false;
+
+  bool has_use_post_process_filters = false;
+  bool use_post_process_filters = true;
+};
+
+bool a3d_read_render_settings(const string &scene_root, A3DRenderSettings *settings, string *error);
+
 bool a3d_read_scene(Scene *scene,
                     const string &scene_root,
                     const A3DSceneReaderOptions &options,

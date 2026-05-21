@@ -65,6 +65,7 @@ struct Options {
   float sample_clamp_indirect;
   bool use_oidn_denoiser;
   bool disable_post_process_filters;
+  bool has_flood_dark_limit;
   float flood_dark_limit;
 } options;
 
@@ -182,6 +183,39 @@ static bool find_oidn_denoise_device(const DeviceInfo &preferred_device, DeviceI
   }
 
   return false;
+}
+
+static void apply_a3d_render_settings_defaults()
+{
+  if (options.a3d_scene_root.empty()) {
+    return;
+  }
+
+  A3DRenderSettings settings;
+  string error;
+  if (!a3d_read_render_settings(options.a3d_scene_root, &settings, &error)) {
+    fprintf(stderr, "%s\n", error.c_str());
+    exit(EXIT_FAILURE);
+  }
+
+  if (!options.a3d_options.has_bg_color && settings.scene_options.has_bg_color) {
+    options.a3d_options.bg_color = settings.scene_options.bg_color;
+    options.a3d_options.has_bg_color = true;
+  }
+  if (!options.a3d_options.has_bg_strength && settings.scene_options.has_bg_strength) {
+    options.a3d_options.bg_strength = settings.scene_options.bg_strength;
+    options.a3d_options.has_bg_strength = true;
+  }
+  if (!options.has_flood_dark_limit && settings.has_flood_dark_limit) {
+    options.flood_dark_limit = settings.flood_dark_limit;
+    options.has_flood_dark_limit = true;
+  }
+  if (!options.use_oidn_denoiser && settings.has_use_oidn_denoiser) {
+    options.use_oidn_denoiser = settings.use_oidn_denoiser;
+  }
+  if (!options.disable_post_process_filters && settings.has_use_post_process_filters) {
+    options.disable_post_process_filters = !settings.use_post_process_filters;
+  }
 }
 
 static string normalize_device_name_for_cycles(const string &name)
@@ -735,6 +769,7 @@ static void options_parse(const int argc, const char **argv)
   options.sample_clamp_indirect = -1.0f;
   options.use_oidn_denoiser = false;
   options.disable_post_process_filters = false;
+  options.has_flood_dark_limit = false;
   options.flood_dark_limit = 0.0f;
 
   /* device names */
@@ -873,7 +908,10 @@ static void options_parse(const int argc, const char **argv)
       .action([&](auto) { options.disable_post_process_filters = true; });
   ap.arg("--flood-dark-limit %f:VALUE")
       .help("Accepted for SparkTrace preview compatibility")
-      .action([&](auto argv) { parse_float(argv, &options.flood_dark_limit); });
+      .action([&](auto argv) {
+        parse_float(argv, &options.flood_dark_limit);
+        options.has_flood_dark_limit = true;
+      });
   ap.arg("--bg-map %s:PATH").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-gamma %f:GAMMA").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
   ap.arg("--bg-map-yaw %f:DEG").help("Accepted for Asset3D Studio compatibility").action([](auto) {});
@@ -948,6 +986,8 @@ static void options_parse(const int argc, const char **argv)
     ap.print_help();
     exit(EXIT_SUCCESS);
   }
+
+  apply_a3d_render_settings_defaults();
 
   options.session_params.use_profiling = profile;
 
