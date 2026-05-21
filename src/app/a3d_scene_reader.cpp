@@ -949,10 +949,31 @@ void create_default_background(Scene *scene, const A3DSceneReaderOptions &option
 {
   Shader *shader = scene->default_background;
   auto graph = make_unique<ShaderGraph>();
-  BackgroundNode *background = graph->create_node<BackgroundNode>();
-  background->set_color(options.has_bg_color ? options.bg_color : make_float3(0.05f, 0.05f, 0.05f));
-  background->set_strength(options.has_bg_strength ? options.bg_strength : 1.0f);
-  graph->connect(background->output("Background"), graph->output()->input("Surface"));
+  const float3 color = options.has_bg_color ? options.bg_color : make_float3(0.05f, 0.05f, 0.05f);
+  const float strength = options.has_bg_strength ? options.bg_strength : 1.0f;
+
+  if (options.has_bg_strength && strength != 1.0f) {
+    BackgroundNode *lit_background = graph->create_node<BackgroundNode>();
+    lit_background->set_color(color);
+    lit_background->set_strength(strength);
+
+    BackgroundNode *camera_background = graph->create_node<BackgroundNode>();
+    camera_background->set_color(color);
+    camera_background->set_strength(1.0f);
+
+    LightPathNode *light_path = graph->create_node<LightPathNode>();
+    MixClosureNode *mix = graph->create_node<MixClosureNode>();
+    graph->connect(light_path->output("Is Camera Ray"), mix->input("Fac"));
+    graph->connect(lit_background->output("Background"), mix->input("Closure1"));
+    graph->connect(camera_background->output("Background"), mix->input("Closure2"));
+    graph->connect(mix->output("Closure"), graph->output()->input("Surface"));
+  }
+  else {
+    BackgroundNode *background = graph->create_node<BackgroundNode>();
+    background->set_color(color);
+    background->set_strength(strength);
+    graph->connect(background->output("Background"), graph->output()->input("Surface"));
+  }
   shader->set_graph(std::move(graph));
   shader->tag_update(scene);
 }

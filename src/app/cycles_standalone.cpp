@@ -64,10 +64,55 @@ struct Options {
   float sample_clamp_direct;
   float sample_clamp_indirect;
   bool use_oidn_denoiser;
+  bool disable_post_process_filters;
   float flood_dark_limit;
 } options;
 
 static vector<float> a3d_preview_result;
+
+static void apply_sparktrace_preview_filters(vector<float> &rgba, const int width, const int height)
+{
+  if (options.disable_post_process_filters || options.a3d_scene_root.empty()) {
+    return;
+  }
+
+  for (int y = 0; y < height; ++y) {
+    float *row = rgba.data() + size_t(y) * size_t(width) * 4;
+    for (int x = 0; x < width; ++x) {
+      float *pixel = row + x * 4;
+      const float luminance = 0.2126f * pixel[0] + 0.7152f * pixel[1] + 0.0722f * pixel[2];
+
+      for (int c = 0; c < 3; ++c) {
+        float value = luminance + (pixel[c] - luminance) * 1.18f;
+        value = (value - 0.18f) * 1.18f + 0.18f;
+        pixel[c] = max(value, 0.0f);
+      }
+    }
+  }
+
+  if (width < 3 || height < 3) {
+    return;
+  }
+
+  vector<float> sharpened = rgba;
+  for (int y = 1; y < height - 1; ++y) {
+    for (int x = 1; x < width - 1; ++x) {
+      const size_t offset = (size_t(y) * size_t(width) + size_t(x)) * 4;
+      for (int c = 0; c < 3; ++c) {
+        float sum = 0.0f;
+        for (int yy = -1; yy <= 1; ++yy) {
+          for (int xx = -1; xx <= 1; ++xx) {
+            const size_t sample_offset = (size_t(y + yy) * size_t(width) + size_t(x + xx)) * 4;
+            sum += rgba[sample_offset + c];
+          }
+        }
+        const float blur = sum / 9.0f;
+        sharpened[offset + c] = max(rgba[offset + c] + (rgba[offset + c] - blur) * 0.35f, 0.0f);
+      }
+    }
+  }
+  rgba.swap(sharpened);
+}
 
 static void apply_flood_dark_limit(vector<float> &rgba, const int width, const int height)
 {
@@ -98,6 +143,12 @@ static void apply_flood_dark_limit(vector<float> &rgba, const int width, const i
       }
     }
   }
+}
+
+static void process_preview_pixels(vector<float> &rgba, const int width, const int height)
+{
+  apply_sparktrace_preview_filters(rgba, width, height);
+  apply_flood_dark_limit(rgba, width, height);
 }
 
 static bool device_supports_oidn(const DeviceInfo &info)
@@ -176,7 +227,7 @@ class A3DPreviewOutputDriver : public OutputDriver {
       fprintf(stderr, "Failed to read preview render pass pixels\n");
       return;
     }
-    apply_flood_dark_limit(rgba, width, height);
+    process_preview_pixels(rgba, width, height);
 
     a3d_preview_result.assign(size_t(3) + size_t(width) * size_t(height) * 3, 0.0f);
     a3d_preview_result[1] = float(width);
@@ -396,7 +447,7 @@ static void session_init()
 
   if (!options.output_filepath.empty()) {
     unique_ptr<OutputDriver> output_driver = make_unique<OIIOOutputDriver>(
-        options.output_filepath, options.output_pass, session_print, apply_flood_dark_limit);
+        options.output_filepath, options.output_pass, session_print, process_preview_pixels);
     if (options.a3d_status_messages) {
       output_driver = make_unique<A3DPreviewOutputDriver>(std::move(output_driver));
     }
@@ -683,6 +734,7 @@ static void options_parse(const int argc, const char **argv)
   options.sample_clamp_direct = -1.0f;
   options.sample_clamp_indirect = -1.0f;
   options.use_oidn_denoiser = false;
+  options.disable_post_process_filters = false;
   options.flood_dark_limit = 0.0f;
 
   /* device names */
@@ -817,8 +869,8 @@ static void options_parse(const int argc, const char **argv)
   ap.arg("--use-oidn-denoiser", &options.use_oidn_denoiser)
       .help("SparkTrace-compatible request to use OpenImageDenoise when available");
   ap.arg("--disable-post-process-filters")
-      .help("Accepted for SparkTrace preview compatibility")
-      .action([](auto) {});
+      .help("Disable SparkTrace-compatible preview contrast/saturation/sharpen filters")
+      .action([&](auto) { options.disable_post_process_filters = true; });
   ap.arg("--flood-dark-limit %f:VALUE")
       .help("Accepted for SparkTrace preview compatibility")
       .action([&](auto argv) { parse_float(argv, &options.flood_dark_limit); });

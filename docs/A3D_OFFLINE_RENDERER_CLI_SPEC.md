@@ -84,7 +84,7 @@ acycles \
 | `--max-transparent-bounces` | Studio/SparkTrace-compatible transparent bounce limit |
 | `--denoise` | enable denoising |
 | `--use-oidn-denoiser` | SparkTrace-compatible request for OpenImageDenoise; no-ops with an `info:` line when unavailable |
-| `--disable-post-process-filters` | accepted for SparkTrace preview compatibility; currently no-op |
+| `--disable-post-process-filters` | disables SparkTrace-compatible preview contrast/saturation/sharpen filters |
 | `--flood-dark-limit <value>` | raises output pixels darker than the limit to avoid pure-black preview regions |
 | `--quiet` | suppress verbose logs |
 
